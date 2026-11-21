@@ -1,0 +1,953 @@
+<template>
+  <el-card shadow="never" class="admin-card">
+    <template #header>
+      <div class="card-header">
+        <div class="card-header-left">
+          <span class="card-header-title">{{ `当前共 ${allTools.length} 条` }}</span>
+          <span class="card-header-tip">名称、分类、内网网址、描述、logo 网址可直接修改，失焦/回车后自动保存；网址与 logo 图片名为只读，没有本地图标图片的行可以直接上传一张</span>
+          <template v-if="selectedRows.length">
+            <el-popconfirm title="确定删除这些吗？" @confirm="handleBulkDelete">
+              <template #reference>
+                <el-button link type="danger">删除</el-button>
+              </template>
+            </el-popconfirm>
+            <el-popconfirm title="确定重置这些的图标吗？（清空图标网址与图片名后按网址重新抓取网站图标，抓不到时显示默认图片 default.png）" @confirm="handleBulkResetLogo">
+              <template #reference>
+                <el-button link type="primary" :loading="bulkLoading">重置默认图标</el-button>
+              </template>
+            </el-popconfirm>
+            <el-popconfirm title="确定重新获取这些的图标吗？（会按工具网址重新抓取图标并下载到 data 目录，抓不到时显示默认图片 default.png）" @confirm="handleBulkCacheLogo">
+              <template #reference>
+                <el-button link type="primary" :loading="bulkLoading">重置缓存图标</el-button>
+              </template>
+            </el-popconfirm>
+          </template>
+        </div>
+        <div class="card-header-right">
+          <el-select v-model="catelogName" class="filter-select" placeholder="分类筛选" clearable>
+            <el-option v-for="opt in catelogOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+          </el-select>
+          <el-input v-model="searchString" class="filter-input" placeholder="搜索名称/描述" clearable />
+          <el-button type="primary" :icon="Plus" @click="openAdd">添加</el-button>
+          <el-button :icon="Refresh" @click="reload">刷新</el-button>
+          <el-tooltip content="导入备份文件（工具/搜索引擎同 id 覆盖；便签与现有内容合并，不会替换）" placement="top">
+            <el-upload accept=".json" :show-file-list="false" :before-upload="handleImportFile">
+              <el-button :icon="Upload" :loading="importLoading">导入</el-button>
+            </el-upload>
+          </el-tooltip>
+          <el-tooltip content="导出全部数据（工具、分类、搜索引擎、API Token），图标只导出图标网址（工具的图片名与搜索引擎的图标不导出），导入后按网址重新获取" placement="top">
+            <el-button :icon="Download" @click="handleExport">导出</el-button>
+          </el-tooltip>
+          <TableColumnSettings table-key="tools" :columns="toolColumns" />
+        </div>
+      </div>
+    </template>
+
+    <el-table
+      ref="tableRef"
+      v-loading="loading"
+      :data="pagedData"
+      :row-class-name="rowClassName"
+      row-key="id"
+      @selection-change="onSelectionChange"
+    >
+      <el-table-column type="selection" width="46" />
+      <el-table-column v-if="isCol('sort')" width="92" align="center">
+        <template #header>
+          <span class="column-with-tip">
+            排序
+            <el-tooltip content="拖动左侧手柄排序，序号从 1 开始依次递增" placement="top">
+              <el-icon><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </span>
+        </template>
+        <template #default="{ row }">
+          <div class="sort-cell">
+            <el-icon class="drag-handle"><Rank /></el-icon>
+            <span class="sort-value">{{ row.sort ?? 0 }}</span>
+          </div>
+        </template>
+      </el-table-column>
+      <!-- <el-table-column prop="id" label="ID" width="70" /> -->
+      <el-table-column v-if="isCol('name')" label="名称" min-width="160">
+        <template #default="{ row }">
+          <div class="tool-name-cell">
+            <!-- 有图片名时读 data 目录里的本地图片，其次按图标网址显示；两者都没有时显示名称首字符占位图，有图标但加载失败也显示占位图 -->
+            <LogoFallback v-if="!hasToolLogo(row)" class="tool-logo" :name="row.name" />
+            <!-- 地址带版本号并作为 key：logo 图片重新下载时文件名不变（覆盖同名文件），靠版本号强制重新取图，避免显示旧图或占位图 -->
+            <el-image v-else :key="logoCellUrl(row)" class="tool-logo" :src="logoCellUrl(row)" fit="cover" lazy>
+              <template #error>
+                <LogoFallback class="tool-logo-error" :name="row.name" />
+              </template>
+            </el-image>
+            <el-input v-model="row.name" placeholder="请输入名称" @change="saveRow(row)" />
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column v-if="isCol('catelog')" label="分类" width="130">
+        <template #default="{ row }">
+          <el-select
+            v-model="row.catelog"
+            placeholder="未分类"
+            clearable
+            style="width: 100%"
+            @change="saveRow(row)"
+          >
+            <el-option v-for="opt in catelogOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+          </el-select>
+        </template>
+      </el-table-column>
+      <el-table-column v-if="isCol('url')" label="网址" min-width="190">
+        <template #header>
+          <span class="column-with-tip">
+            网址
+            <el-tooltip content="工具网址由添加时填写，这里只读展示，不能直接修改" placement="top">
+              <el-icon><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </span>
+        </template>
+        <template #default="{ row }">
+          <span class="readonly-cell" :class="{ 'is-empty': !row.url }" :title="row.url || ''">
+            {{ row.url || '-' }}
+          </span>
+        </template>
+      </el-table-column>
+      <el-table-column v-if="isCol('internalUrl')" label="内网网址" min-width="180">
+        <template #header>
+          <span class="column-with-tip">
+            内网网址
+            <el-tooltip
+              content="选填，留空表示没有内网地址。首页点击卡片时先检测该地址是否可达：可达就打开内网网址，不通（超时/连不上）则回退到外网网址"
+              placement="top"
+            >
+              <el-icon><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </span>
+        </template>
+        <template #default="{ row }">
+          <el-input v-model="row.internalUrl" placeholder="选填，留空表示没有内网地址" @change="saveRow(row)" />
+        </template>
+      </el-table-column>
+      <el-table-column v-if="isCol('desc')" label="描述" min-width="150">
+        <template #default="{ row }">
+          <el-input v-model="row.desc" placeholder="请输入描述" @change="saveRow(row)" />
+        </template>
+      </el-table-column>
+      <el-table-column v-if="isCol('logo')" label="logo 网址" min-width="170">
+        <template #header>
+          <span class="column-with-tip">
+            logo 网址
+            <el-tooltip
+              content="图标网址：修改后保存时会重新获取图标——填图片地址（http://、https:// 开头的图片链接）时先按这个地址下载这张图片（文件名用工具名称）并保留填写的网址；按填写的地址拿不到图片、或改成空与其他内容时，改按工具网址抓取网站图标（失败用 gstatic 兜底）并下载，获取成功时这里会写入抓到的图标网址。都拿不到时两个字段都置空，前台显示默认图片 default.png"
+              placement="top"
+            >
+              <el-icon><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </span>
+        </template>
+        <template #default="{ row }">
+          <el-input v-model="row.logo" placeholder="修改后会重新获取图标（图片外链优先下载该图片）" @change="saveRow(row)" />
+        </template>
+      </el-table-column>
+      <el-table-column v-if="isCol('logoName')" label="logo 图片名" min-width="150">
+        <template #header>
+          <span class="column-with-tip">
+            logo 图片名
+            <el-tooltip
+              content="图标图片保存到 data 目录（data/images）后的文件名，由 logo 网址下载图片或后台上传图片时自动生成，这里只读展示；前台优先按它读本地图片"
+              placement="top"
+            >
+              <el-icon><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </span>
+        </template>
+        <template #default="{ row }">
+          <span v-if="row.logoName" class="readonly-cell" :title="row.logoName">{{ row.logoName }}</span>
+          <!-- 还没有本地图标图片（抓取不到图标）的行可以直接上传一张：图片按工具名称命名保存到 data 目录（data/images），与自动抓取的图标命名一致 -->
+          <el-upload
+            v-else
+            class="logo-upload"
+            accept=".png,.jpg,.jpeg,.webp,.gif,.svg,.ico"
+            :show-file-list="false"
+            :before-upload="(file: UploadRawFile) => handleUploadLogo(row, file)"
+          >
+            <el-tooltip content="这一行还没有本地图标图片，可以上传一张（按工具名称命名保存到 data 目录，保存后自动更新图标）" placement="top">
+              <el-button link type="primary" :loading="isUploadingLogo(row)">上传图片</el-button>
+            </el-tooltip>
+          </el-upload>
+        </template>
+      </el-table-column>
+      <el-table-column v-if="isCol('hide')" width="76" align="center">
+        <template #header>
+          <span class="column-with-tip">
+            隐藏
+            <el-tooltip content="开启后只有登录后才会展示该工具" placement="top">
+              <el-icon><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </span>
+        </template>
+        <template #default="{ row }">
+          <el-switch v-model="row.hide" inline-prompt active-text="开" inactive-text="关" @change="saveRow(row)" />
+        </template>
+      </el-table-column>
+      <el-table-column v-if="isCol('default')" width="76" align="center">
+        <template #header>
+          <span class="column-with-tip">
+            默认
+            <el-tooltip content="开启后在默认页展示" placement="top">
+              <el-icon><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </span>
+        </template>
+        <template #default="{ row }">
+          <el-switch v-model="row.default" inline-prompt active-text="开" inactive-text="关" @change="saveRow(row)" />
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" width="140" :fixed="isMobile ? false : 'right'">
+        <template #default="{ row }">
+          <span v-if="isSaving(row)" class="cell-status">保存中…</span>
+          <template v-else-if="isDirty(row)">
+            <el-button link type="primary" @click="saveRow(row)">保存</el-button>
+            <el-button link type="info" @click="revertRow(row)">撤销</el-button>
+          </template>
+          <el-popconfirm :title="`确定要删除 ${row.name} 吗？`" @confirm="handleDelete(row.id)">
+            <template #reference>
+              <el-button link type="danger">删除</el-button>
+            </template>
+          </el-popconfirm>
+        </template>
+      </el-table-column>
+    </el-table>
+
+    <el-pagination
+      v-model:current-page="page"
+      v-model:page-size="pageSize"
+      class="table-pagination"
+      background
+      :page-sizes="[10, 20, 50, 100]"
+      :total="filteredTools.length"
+      layout="total, sizes, prev, pager, next, jumper"
+    />
+  </el-card>
+
+  <el-dialog v-model="showAdd" title="新建工具" width="560px" destroy-on-close>
+    <el-form ref="addFormRef" :model="addForm" :rules="toolRules" label-width="90px">
+      <el-form-item label="网址" prop="url">
+        <div class="url-field">
+          <el-input
+            v-model="addForm.url"
+            placeholder="请输入完整 URL（以 http:// 或 https:// 开头）"
+            @change="autoFillFromUrl()"
+          >
+            <template #suffix>
+              <el-icon v-if="urlInfoLoading" class="is-loading"><Loading /></el-icon>
+            </template>
+          </el-input>
+          <div class="form-tip">
+            <span>输入网址后会自动获取名称、描述和图标</span>
+            <el-button
+              link
+              type="primary"
+              :disabled="!addForm.url"
+              :loading="urlInfoLoading"
+              @click="autoFillFromUrl()"
+            >
+              重新获取
+            </el-button>
+          </div>
+        </div>
+      </el-form-item>
+      <el-form-item label="内网网址" prop="internalUrl">
+        <el-input v-model="addForm.internalUrl" placeholder="选填，内网地址（以 http:// 或 https:// 开头），留空表示没有" />
+        <div class="form-tip">
+          <span>选填：首页点击卡片时优先访问内网网址，检测不通时自动回退到上面的外网网址</span>
+        </div>
+      </el-form-item>
+      <el-form-item label="名称" prop="name">
+        <el-input v-model="addForm.name" placeholder="请输入工具名称" />
+      </el-form-item>
+      <el-form-item label="logo 网址" prop="logo">
+        <el-input v-model="addForm.logo" placeholder="留空或填外链都会按网址获取网站图标并下载到 data 目录" />
+      </el-form-item>
+      <el-form-item label="logo 图片名" prop="logoName">
+        <el-input v-model="addForm.logoName" placeholder="图标图片保存到 data 目录后的文件名，留空会自动获取" />
+      </el-form-item>
+      <el-form-item label="分类" prop="catelog">
+        <el-select v-model="addForm.catelog" placeholder="请选择分类" style="width: 100%">
+          <el-option v-for="opt in catelogOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="描述" prop="desc">
+        <el-input v-model="addForm.desc" placeholder="选填，可自动获取" />
+      </el-form-item>
+      <el-form-item label="排序" prop="sort">
+        <el-tooltip
+          content="-1（默认）排到最后；0 或留空排到最前；正数插入到该序号位置；保存后所有排序值会重排为 1、2、3…"
+          placement="top"
+        >
+          <el-input-number v-model="addForm.sort" :min="-1" :step="1" controls-position="right" />
+        </el-tooltip>
+      </el-form-item>
+      <el-form-item label="隐藏">
+        <el-tooltip content="开启后只有登录后才会展示该工具" placement="top">
+          <el-switch v-model="addForm.hide" inline-prompt active-text="开" inactive-text="关" />
+        </el-tooltip>
+      </el-form-item>
+      <el-form-item label="默认">
+        <el-tooltip content="开启后在默认页展示" placement="top">
+          <el-switch v-model="addForm.default" inline-prompt active-text="开" inactive-text="关" />
+        </el-tooltip>
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="showAdd = false">取消</el-button>
+      <el-button type="primary" :loading="requestLoading" @click="handleCreate">确定</el-button>
+    </template>
+  </el-dialog>
+
+</template>
+
+<script setup lang="ts">
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { ElMessage } from 'element-plus'
+import { Download, Loading, Plus, QuestionFilled, Rank, Refresh, Upload } from '@element-plus/icons-vue'
+import type { FormInstance, FormRules, UploadRawFile } from 'element-plus'
+import {
+  fetchAddTool,
+  fetchDeleteTool,
+  fetchExportAll,
+  fetchGetUrlInfo,
+  fetchImportAll,
+  fetchUpdateTool,
+  fetchUpdateToolsSort,
+  fetchUploadToolLogo,
+  resolveError,
+} from '../../api'
+import { useAdminStore } from '../../stores/admin'
+import { useTableColumnsStore } from '../../stores/tableColumns'
+import type { TableColumnOption } from '../../stores/tableColumns'
+import { useIsMobile } from '../../composables/useIsMobile'
+import { useTableSortable } from '../../composables/useTableSortable'
+import LogoFallback from '../../components/LogoFallback.vue'
+import TableColumnSettings from '../../components/TableColumnSettings.vue'
+import { multiSearch, pinyinReady } from '../../utils/match'
+import { getToolLogoUrl, hasToolLogo } from '../../utils/check'
+import { clearSearchEngineCache } from '../../utils/searchEngine'
+import type { BackupData, Tool } from '../../types'
+
+interface ToolForm {
+  id?: number
+  name: string
+  url: string
+  /** 内网网址：选填，留空表示没有内网地址 */
+  internalUrl: string
+  /** 图标网址：可以下载到图片的 url 地址 */
+  logo: string
+  /** 图标图片名：图片保存到 data 目录（data/images）后的文件名 */
+  logoName: string
+  catelog: string
+  desc: string
+  sort: number
+  hide: boolean
+  default: boolean
+}
+
+const createEmptyForm = (): ToolForm => ({
+  name: '',
+  url: '',
+  internalUrl: '',
+  logo: '',
+  logoName: '',
+  catelog: '',
+  desc: '',
+  // -1 表示新增后自动排到最后；0 或留空表示排到最前；正数表示插入到该序号位置
+  sort: -1,
+  hide: false,
+  // 新工具默认展示在默认页
+  default: true,
+})
+
+/** 工具管理表格可隐藏的列；多选列与操作列固定保留 */
+const toolColumns: TableColumnOption[] = [
+  { key: 'sort', label: '排序' },
+  { key: 'name', label: '名称' },
+  { key: 'catelog', label: '分类' },
+  { key: 'url', label: '网址' },
+  { key: 'internalUrl', label: '内网网址' },
+  { key: 'desc', label: '描述' },
+  { key: 'logo', label: 'logo 网址' },
+  { key: 'logoName', label: 'logo 图片名' },
+  { key: 'hide', label: '隐藏' },
+  { key: 'default', label: '默认' },
+]
+const cols = useTableColumnsStore()
+/** 绑定工具表的列可见性判断：v-if="isCol('name')" */
+const isCol = (key: string) => cols.isVisible('tools', key)
+
+const adminStore = useAdminStore()
+const store = computed(() => adminStore.store)
+const loading = computed(() => adminStore.loading)
+const allTools = computed<Tool[]>(() => store.value.tools ?? [])
+const catelogOptions = computed(() =>
+  (store.value.catelogs ?? []).map((item) => ({ label: item.name, value: item.name }))
+)
+
+/** 手机布局：操作列不再固定到右侧（固定列会遮住窄屏里本就不多的内容） */
+const isMobile = useIsMobile()
+
+const tableRef = ref()
+const addFormRef = ref<FormInstance>()
+const addForm = reactive<ToolForm>(createEmptyForm())
+
+const searchString = ref('')
+const catelogName = ref('')
+const selectedRows = ref<Tool[]>([])
+const requestLoading = ref(false)
+// 批量重置/获取图标时逐个请求（每个都要抓取并下载图标），用 loading 避免重复点击
+const bulkLoading = ref(false)
+const showAdd = ref(false)
+const page = ref(1)
+const pageSize = ref(100)
+/** 添加工具时是否正在抓取网址信息 */
+const urlInfoLoading = ref(false)
+/** 导入备份时是否正在请求 */
+const importLoading = ref(false)
+
+/** 每行「服务端已保存」的快照，用于判断是否被改动 / 撤销 */
+const snapshotMap = reactive<Record<number, Tool>>({})
+/** 每行是否正在保存 */
+const savingMap = reactive<Record<number, boolean>>({})
+
+/** 每行图标地址的版本号：logo 图片重新下载时文件名不变（覆盖同名文件），靠它给图标地址加 ?v= 强制重新取图 */
+const logoVersionMap = reactive<Record<number, number>>({})
+
+/** 表格里的图标地址：带版本号后地址会变，<el-image> 的 key 也跟着变，会重新加载一次图片 */
+const logoCellUrl = (row: Tool) => {
+  const url = getToolLogoUrl(row)
+  const version = logoVersionMap[row.id] ?? 0
+  return version ? `${url}${url.includes('?') ? '&' : '?'}v=${version}` : url
+}
+
+/** 图标可能被重新下载（同名文件被覆盖）时调用：版本号 +1，表格里的图标会立刻重新取图 */
+const bumpLogoVersion = (id: number) => {
+  logoVersionMap[id] = (logoVersionMap[id] ?? 0) + 1
+}
+
+const toolRules: FormRules = {
+  name: [{ required: true, message: '请填写名称', trigger: 'blur' }],
+  url: [
+    { required: true, message: '请填写网址', trigger: 'blur' },
+    { pattern: /^https?:\/\//, message: '网址必须以 http:// 或 https:// 开头', trigger: 'blur' },
+  ],
+  // 内网网址选填：留空不校验，填了就必须是 http(s) 地址
+  internalUrl: [
+    {
+      validator: (_rule: unknown, value: string, callback: (error?: Error) => void) => {
+        const text = String(value ?? '').trim()
+        if (text && !/^https?:\/\//i.test(text)) {
+          callback(new Error('内网网址必须以 http:// 或 https:// 开头，留空表示没有'))
+          return
+        }
+        callback()
+      },
+      trigger: 'blur',
+    },
+  ],
+  catelog: [{ required: true, message: '请选择分类', trigger: 'change' }],
+}
+
+const sortedTools = computed(() => [...allTools.value].sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0)))
+
+const filteredTools = computed(() =>
+  // 订阅拼音分包就绪状态：分包加载完自动重算，补上拼音匹配结果（见 utils/match.ts）
+  (void pinyinReady.value,
+  sortedTools.value.filter((item) => {
+    const matchSearch =
+      !searchString.value.trim() ||
+      multiSearch(item.name, searchString.value) ||
+      multiSearch(item.desc, searchString.value)
+    const matchCatelog = !catelogName.value || multiSearch(item.catelog, catelogName.value)
+    return matchSearch && matchCatelog
+  }))
+)
+
+const pagedData = computed(() => {
+  const start = (page.value - 1) * pageSize.value
+  return filteredTools.value.slice(start, start + pageSize.value)
+})
+
+watch([searchString, catelogName, pageSize], () => {
+  page.value = 1
+})
+
+const loadData = async (force = false) => {
+  try {
+    await adminStore.load(force)
+  } catch (error) {
+    ElMessage.error(resolveError(error, '加载数据失败'))
+  }
+}
+
+const reload = () => loadData(true)
+
+// ==================== 拖拽排序 ====================
+
+/** 按给定顺序把排序值重写成「从 1 开始依次递增」，并同步本地快照（返回给接口的数据） */
+const buildSortUpdates = (list: Tool[]) => {
+  const updates: { id: number; sort: number }[] = []
+  list.forEach((item, index) => {
+    const sort = index + 1
+    item.sort = sort
+    // 同步快照里的排序值，避免排序后被标成「未保存」
+    const snapshot = snapshotMap[item.id]
+    if (snapshot) {
+      snapshot.sort = sort
+    }
+    updates.push({ id: item.id, sort })
+  })
+  return updates
+}
+
+const persistSort = async (movedId: number, targetId: number) => {
+  const list = [...sortedTools.value]
+  const from = list.findIndex((item) => item.id === movedId)
+  const to = list.findIndex((item) => item.id === targetId)
+  if (from < 0 || to < 0) {
+    return
+  }
+  const [moved] = list.splice(from, 1)
+  list.splice(to, 0, moved)
+  // 先写回本地，表格立即按新顺序刷新；排序值从 1 开始依次递增
+  const updates = buildSortUpdates(list)
+  try {
+    await fetchUpdateToolsSort(updates)
+    ElMessage({ message: '排序已更新', type: 'success', grouping: true, duration: 1200 })
+  } catch (error) {
+    ElMessage.error(resolveError(error, '排序更新失败'))
+    // 失败时以服务端数据为准
+    await reload()
+  }
+}
+
+useTableSortable({
+  tableRef,
+  rows: pagedData,
+  onEnd: (oldIndex, newIndex) => {
+    const moved = pagedData.value[oldIndex]
+    const target = pagedData.value[newIndex]
+    if (!moved || !target) {
+      return
+    }
+    persistSort(moved.id, target.id)
+  },
+})
+
+// ==================== 行内编辑（点击单元格直接修改） ====================
+
+/** 取出一行的可编辑字段（用于快照比对） */
+const pickRow = (row: Tool): Tool => ({
+  id: row.id,
+  name: row.name,
+  url: row.url,
+  internalUrl: row.internalUrl,
+  logo: row.logo,
+  logoName: row.logoName,
+  catelog: row.catelog,
+  desc: row.desc,
+  sort: row.sort,
+  hide: row.hide,
+  default: row.default,
+})
+
+/** 数据（重新）加载后重建快照 */
+const seedSnapshots = () => {
+  Object.keys(snapshotMap).forEach((key) => delete snapshotMap[Number(key)])
+  allTools.value.forEach((row) => {
+    snapshotMap[row.id] = pickRow(row)
+  })
+}
+
+watch(allTools, seedSnapshots, { immediate: true })
+
+const isDirty = (row: Tool) => {
+  const snap = snapshotMap[row.id]
+  if (!snap) {
+    return false
+  }
+  return (
+    row.name !== snap.name ||
+    row.url !== snap.url ||
+    row.internalUrl !== snap.internalUrl ||
+    row.logo !== snap.logo ||
+    row.logoName !== snap.logoName ||
+    row.catelog !== snap.catelog ||
+    row.desc !== snap.desc ||
+    row.sort !== snap.sort ||
+    Boolean(row.hide) !== Boolean(snap.hide) ||
+    Boolean(row.default) !== Boolean(snap.default)
+  )
+}
+
+const isSaving = (row: Tool) => savingMap[row.id] === true
+
+const rowClassName = ({ row }: { row: Tool }) => (isDirty(row) ? 'row-dirty' : '')
+
+/** 行内保存前的校验（分类、描述允许留空，避免历史数据无法保存） */
+const validateRow = (row: Tool) => {
+  if (!row.name || !String(row.name).trim()) {
+    return '名称不能为空'
+  }
+  if (!row.url || !String(row.url).trim()) {
+    return '网址不能为空'
+  }
+  if (!/^https?:\/\//.test(String(row.url).trim())) {
+    return '网址必须以 http:// 或 https:// 开头'
+  }
+  // 内网网址选填：留空表示没有内网地址
+  const internalUrl = String(row.internalUrl ?? '').trim()
+  if (internalUrl && !/^https?:\/\//i.test(internalUrl)) {
+    return '内网网址必须以 http:// 或 https:// 开头，留空表示没有'
+  }
+  return ''
+}
+
+/** 保存单行（输入框失焦/回车、选择器与开关变化时自动触发） */
+const saveRow = async (row: Tool) => {
+  if (isSaving(row)) {
+    return
+  }
+  const errorMessage = validateRow(row)
+  if (errorMessage) {
+    ElMessage.warning(errorMessage)
+    return
+  }
+  // logo 网址改动后后端会重新获取图标：图片外链先按填写的地址下载这张图片，下载不到、或改成空与
+  // 其他内容时改按工具网址抓取网站图标；接口返回时 logo 与 logoName 已经是最终值，拉一次列表就能更新到表格
+  const logo = String(row.logo ?? '').trim()
+  const logoName = String(row.logoName ?? '').trim()
+  const before = snapshotMap[row.id]
+  const logoChanged =
+    !before || logo !== String(before.logo ?? '').trim() || logoName !== String(before.logoName ?? '').trim()
+  savingMap[row.id] = true
+  try {
+    // 内网网址选填：去空格后写回该行，留空即没有内网地址
+    row.internalUrl = String(row.internalUrl ?? '').trim()
+    const res = await fetchUpdateTool({
+      ...pickRow(row),
+      name: String(row.name).trim(),
+      url: String(row.url).trim(),
+      desc: String(row.desc ?? '').trim(),
+    })
+    if (res.success === false) {
+      ElMessage.warning(res.errorMessage || '更新失败')
+      return
+    }
+    snapshotMap[row.id] = pickRow(row)
+    ElMessage({ message: '已保存', type: 'success', grouping: true, duration: 1500 })
+    // logo 网址/图片名被改动时后端会重新获取图标（logo 网址可能被改写成抓到的图标网址、也可能被置空），
+    // 重新拉一次列表把最终值更新到表格
+    if (logoChanged) {
+      // 图标是覆盖保存的（文件名不变），版本号 +1 后表格里的图标会重新取图，不会显示成旧图或占位图
+      bumpLogoVersion(row.id)
+      await reload()
+    }
+  } catch (error) {
+    ElMessage.warning(resolveError(error, '更新失败'))
+  } finally {
+    savingMap[row.id] = false
+  }
+}
+
+/** 撤销该行未保存的修改 */
+const revertRow = (row: Tool) => {
+  const snap = snapshotMap[row.id]
+  if (!snap) {
+    return
+  }
+  Object.assign(row, pickRow(snap))
+  ElMessage.info('已撤销未保存的修改')
+}
+
+// ==================== 上传图标（没有本地图标图片的行） ====================
+
+/** 每行是否正在上传图标（上传期间按钮显示 loading，避免重复上传） */
+const logoUploadingMap = reactive<Record<number, boolean>>({})
+
+const isUploadingLogo = (row: Tool) => logoUploadingMap[row.id] === true
+
+/**
+ * 给该行上传一张本地图片当图标：图片按工具名称命名保存到 data 目录（data/images），
+ * 与按网址自动抓取的图标命名一致（工具名称 + 图片后缀），后端同时更新该行的图标网址与 logo 图片名
+ */
+const handleUploadLogo = async (row: Tool, file: UploadRawFile) => {
+  if (logoUploadingMap[row.id]) {
+    return false
+  }
+  logoUploadingMap[row.id] = true
+  try {
+    const saved = await fetchUploadToolLogo(row.id, file)
+    // 图标文件名变了（logo 图片名由空变成文件名），版本号 +1 后表格里的图标会立刻重新取图
+    bumpLogoVersion(row.id)
+    ElMessage.success(saved.name ? `图片已保存到 data 目录：${saved.name}` : '图片已保存到 data 目录')
+    // 图标网址与图片名已由后端更新，重新拉一次列表同步这一行
+    await reload()
+  } catch (error) {
+    ElMessage.warning(resolveError(error, '上传图片失败'))
+  } finally {
+    logoUploadingMap[row.id] = false
+  }
+  // 交给 before-upload 返回 false：不让 el-upload 自己发请求，由上面的接口上传
+  return false
+}
+
+// ==================== 增删改 ====================
+
+const openAdd = () => {
+  Object.assign(addForm, createEmptyForm())
+  showAdd.value = true
+}
+
+/**
+ * 根据填写的网址抓取信息：先清空名称/描述/图标网址/图标图片名，再填入抓取到的内容
+ * 名称直接用接口返回的 title
+ */
+const autoFillFromUrl = async () => {
+  const target = addForm.url.trim()
+  if (!target) {
+    return
+  }
+  if (!/^https?:\/\//.test(target)) {
+    ElMessage.warning('网址必须以 http:// 或 https:// 开头')
+    return
+  }
+  // 网址变了就先把上一次抓来的内容全部清掉，避免残留旧信息
+  addForm.name = ''
+  addForm.desc = ''
+  addForm.logo = ''
+  addForm.logoName = ''
+  urlInfoLoading.value = true
+  try {
+    const info = (await fetchGetUrlInfo(target)) ?? { name: '', title: '', description: '', logo: '' }
+    const filled: string[] = []
+    // 名称直接用接口返回的 title
+    const name = (info.title || '').trim()
+    if (name) {
+      addForm.name = name
+      filled.push('名称')
+    }
+    const desc = (info.description || '').trim()
+    if (desc) {
+      addForm.desc = desc
+      filled.push('描述')
+    }
+    const logo = (info.logo || '').trim()
+    if (logo) {
+      addForm.logo = logo
+      filled.push('图标')
+    }
+    if (filled.length) {
+      ElMessage.success(`已自动填充：${filled.join('、')}`)
+    } else {
+      ElMessage.warning('没能读取到网站信息，请手动填写')
+    }
+  } catch (error) {
+    ElMessage.warning(resolveError(error, '获取网址信息失败'))
+  } finally {
+    urlInfoLoading.value = false
+  }
+}
+
+const validateForm = async (formRef?: FormInstance) => {
+  if (!formRef) {
+    return false
+  }
+  return Boolean(await formRef.validate().catch(() => false))
+}
+
+const handleCreate = async () => {
+  if (!(await validateForm(addFormRef.value))) {
+    return
+  }
+  requestLoading.value = true
+  try {
+    // 排序落点（-1/负数排到最后、0 或留空排到最前、正数插入到该序号）与全表排序值重排
+    // 统一由后端 /admin/tool 处理，前端只负责提交表单
+    const res = await fetchAddTool({ ...addForm, internalUrl: String(addForm.internalUrl ?? '').trim() })
+    if (res.success === false) {
+      ElMessage.warning(res.errorMessage || '添加失败')
+      return
+    }
+    showAdd.value = false
+    // 图标是后端后台抓的（不阻塞接口），这里等一小会儿再刷新列表，让图标尽量出现在本次结果里
+    if (res.data?.logoFetching) {
+      ElMessage.success('添加成功，图标稍后自动补上')
+      setTimeout(() => reload(), 1500)
+      return
+    }
+    ElMessage.success('添加成功!')
+    await reload()
+  } catch (error) {
+    ElMessage.warning(resolveError(error, '添加失败'))
+  } finally {
+    requestLoading.value = false
+  }
+}
+
+const handleDelete = async (id: number) => {
+  try {
+    await fetchDeleteTool(id)
+    ElMessage.success('删除成功!')
+  } catch (error) {
+    ElMessage.warning(resolveError(error, '删除失败'))
+  } finally {
+    await reload()
+  }
+}
+
+const onSelectionChange = (rows: Tool[]) => {
+  selectedRows.value = rows
+}
+
+const handleBulkDelete = async () => {
+  for (const each of selectedRows.value) {
+    try {
+      await fetchDeleteTool(each.id)
+    } catch (error) {
+      console.error(error)
+    }
+  }
+  ElMessage.success('删除成功!')
+  await reload()
+}
+
+const handleBulkResetLogo = async () => {
+  bulkLoading.value = true
+  try {
+    for (const each of selectedRows.value) {
+      try {
+        // 图标网址与图片名都传空：后端会按工具网址重新抓取图标，抓不到则都置空（前台显示默认图标）
+        await fetchUpdateTool({ ...each, logo: '', logoName: '' })
+        // 图标重新下载会覆盖同名文件，版本号 +1 让表格里的图标重新取图
+        bumpLogoVersion(each.id)
+      } catch (error) {
+        console.error(error)
+      }
+    }
+    ElMessage.success('重置成功!')
+    // 每个请求返回时图标已经处理好，重新拉一次列表即可看到
+    await reload()
+  } finally {
+    bulkLoading.value = false
+  }
+}
+
+const handleBulkCacheLogo = async () => {
+  bulkLoading.value = true
+  try {
+    for (const each of selectedRows.value) {
+      try {
+        // 图片名传空：强制按工具网址重新抓取图标并下载到 data 目录（本机已有图片时原样提交不会重新获取）
+        await fetchUpdateTool({ ...each, logoName: '' })
+        // 图标重新下载会覆盖同名文件，版本号 +1 让表格里的图标重新取图
+        bumpLogoVersion(each.id)
+      } catch (error) {
+        console.error(error)
+      }
+    }
+    ElMessage.success('获取成功!')
+    await reload()
+  } finally {
+    bulkLoading.value = false
+  }
+}
+
+// ==================== 导入导出 ====================
+
+/** 把导入的文件内容整理成备份结构，兼容旧版只有工具数组的导出文件 */
+const normalizeBackup = (raw: unknown): BackupData | null => {
+  if (Array.isArray(raw)) {
+    return { version: 1, tools: raw as Tool[], catelogs: [], searchEngines: [] }
+  }
+  if (!raw || typeof raw !== 'object') {
+    return null
+  }
+  const data = raw as Partial<BackupData>
+  const backup: BackupData = {
+    version: data.version ?? 1,
+    exportedAt: data.exportedAt,
+    tools: Array.isArray(data.tools) ? data.tools : [],
+    catelogs: Array.isArray(data.catelogs) ? data.catelogs : [],
+    searchEngines: Array.isArray(data.searchEngines) ? data.searchEngines : [],
+  }
+  if (!backup.tools.length && !backup.catelogs.length && !backup.searchEngines.length) {
+    return null
+  }
+  return backup
+}
+
+const handleImportFile = (file: UploadRawFile) => {
+  const reader = new FileReader()
+  reader.readAsText(file)
+  reader.onload = async (result) => {
+    const content = result?.target?.result
+    if (!content) {
+      return
+    }
+    let payload: BackupData | null = null
+    try {
+      payload = normalizeBackup(JSON.parse(content as string))
+    } catch (error) {
+      console.error(error)
+    }
+    if (!payload) {
+      ElMessage.warning('文件内容不是合法的备份数据')
+      return
+    }
+    importLoading.value = true
+    try {
+      const res = await fetchImportAll(payload)
+      const counts = res.data
+      ElMessage.success(
+        `导入成功：工具 ${counts?.tools ?? 0} 条、分类 ${counts?.catelogs ?? 0} 条、搜索引擎 ${counts?.searchEngines ?? 0} 条（与现有合并，重复跳过），便签保留当前内容（导入内容可在「历史版本」找回）；图标会在后台按网址重新抓取并保存到 data 目录（抓不到时显示默认图片，稍后点「刷新」查看）`
+      )
+    } catch (error) {
+      ElMessage.warning(resolveError(error, '导入失败'))
+    } finally {
+      importLoading.value = false
+      clearSearchEngineCache()
+      await reload()
+    }
+  }
+  return false
+}
+
+/** 导出文件名用的时间戳，例如 20261001-1530 */
+const exportStamp = () => {
+  const now = new Date()
+  const pad = (value: number) => `${value}`.padStart(2, '0')
+  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`
+}
+
+const handleExport = async () => {
+  try {
+    const data = await fetchExportAll()
+    // 图标只导出图标网址（工具的图片名与搜索引擎的图标都是空值），这里格式化后导出，方便查看与手工调整
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `nav-backup-${exportStamp()}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    ElMessage.success('导出成功！')
+  } catch (error) {
+    ElMessage.warning(resolveError(error, '导出失败'))
+  }
+}
+
+onMounted(() => {
+  loadData()
+})
+</script>

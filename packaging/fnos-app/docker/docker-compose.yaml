@@ -1,0 +1,19 @@
+services:
+  nav:
+    # 镜像占位符在打包时替换为具体镜像（见 packaging/fnos-app/build-fpk.sh）
+    image: @IMAGE@
+    container_name: nav
+    ports:
+      - "${TRIM_SERVICE_PORT}:6412"
+    # 数据目录取自 fnOS 的数据共享路径（config/resource 里 data-share 声明的 "Nav"，
+    # 实际形如 /vol1/@appshare/Nav）。compose 不支持 bash 式的 %% 截取，
+    # 所以这里用插值 + 默认值：默认值是应用私有目录，安装钩子会把默认值改成真实共享目录，
+    # 这样无论 TRIM_DATA_SHARE_PATHS 有没有注入进 compose 环境都指向同一个位置。
+    volumes:
+      - "${TRIM_DATA_SHARE_PATHS:-/var/apps/nav/var/data}:/app/data"
+    environment:
+      - TZ=Asia/Shanghai
+    # 飞牛 fnOS 关机会主动 docker stop 全部容器：unless-stopped 会把它当成「手动停止」，
+    # 开机后不再拉起，应用中心里表现为「每次重启都要手动启用一次」。
+    # always 不记忆手动停止状态，Docker 守护进程一启动就恢复容器。
+    restart: always

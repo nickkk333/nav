@@ -1,0 +1,14 @@
+{
+    ".url": {
+        "nav.Application": {
+            "title": "Nav",
+            "desc": "Nav 导航站",
+            "icon": "images/256.png",
+            "type": "url",
+            "port": "6412",
+            "protocol": "http",
+            "url": "/",
+            "allUsers": true
+        }
+    }
+}

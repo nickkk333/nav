@@ -1,0 +1,436 @@
+package service
+
+import (
+	"database/sql"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/nickkk333/nav/database"
+	"github.com/nickkk333/nav/logger"
+	"github.com/nickkk333/nav/types"
+	"github.com/nickkk333/nav/utils"
+)
+
+// backupVersion 备份文件格式版本，格式变化时递增，便于后续做兼容处理
+// 1：初版
+// 2：工具图标拆成 logo（图标网址）与 logoName（保存到 data 目录的图片名）
+// 3：新增便签、待办与日历事件
+// 4：移除待办（只保留便签、便签历史版本与日历事件）
+// 5：移除日历事件（只保留便签与便签历史版本）
+const backupVersion = 5
+
+const (
+	// BackupDir 备份文件的存放目录（与 nav.db 同级，docker 部署挂载 ./data 即可持久化）
+	BackupDir = "./data"
+	// BackupFileName 启动时自动导出的备份文件名（每次启动覆盖，避免 data 目录里堆积旧备份）
+	BackupFileName = "nav-backup.json"
+)
+
+// ExportBackupData 导出所有工具、分类、搜索引擎与便签
+// 图标只导出图标网址（不导出图片内容）：工具的 logoName（保存到 data 目录的图片名）与搜索引擎的 logo 都置空，
+// 导入后由服务端按网址重新获取图片并保存到 data 目录
+// api token 不参与导出：避免凭据随备份文件明文外泄（备份常被打包/同步分享）
+func ExportBackupData() types.BackupData {
+	engines, err := database.GetAllSearchEngines()
+	if err != nil {
+		utils.CheckErr(err)
+		engines = make([]types.SearchEngine, 0)
+	}
+	tools := GetAllTool()
+	for i := range tools {
+		tools[i].LogoName = ""
+	}
+	for i := range engines {
+		engines[i].Logo = ""
+	}
+	memo := GetMemo()
+	return types.BackupData{
+		Version:       backupVersion,
+		ExportedAt:    time.Now().Format(time.RFC3339),
+		Tools:         tools,
+		Catelogs:      GetAllCatelog(),
+		SearchEngines: engines,
+		Memo:          &memo,
+		MemoVersions:  GetMemoVersions(),
+	}
+}
+
+// ExportBackupToDataDir 把当前数据导出保存到 data 目录（文件名 BackupFileName，同名直接覆盖）
+// 启动时自动调用，失败只记录日志，不影响服务启动
+func ExportBackupToDataDir() {
+	data := ExportBackupData()
+	content, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		logger.LogError("自动导出备份数据失败: %s", err)
+		return
+	}
+	utils.PathExistsOrCreate(BackupDir)
+	path := filepath.Join(BackupDir, BackupFileName)
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		logger.LogError("自动导出备份数据失败: %s", err)
+		return
+	}
+	logger.LogInfo("已自动导出备份数据到 %s（工具 %d 条，分类 %d 条，搜索引擎 %d 条）",
+		path, len(data.Tools), len(data.Catelogs), len(data.SearchEngines))
+}
+
+// ImportBackupData 导入备份数据（工具、分类、搜索引擎与便签）
+// 工具、搜索引擎同 id 的记录会被覆盖，没有出现在备份里的记录保持不动；
+// 便签合并导入：保留现有数据，备份内容追加进来（重复的跳过），不会整表替换
+// 导入完成后异步获取图片：备份里只存了图标网址，这里按网址重新缓存/下载
+// api token 不参与导入：导入方各自在后台管理里维护自己的 token，避免跨实例泄露凭据
+func ImportBackupData(data types.BackupData) error {
+	tx, err := database.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if err = importCatelogs(tx, data.Catelogs); err != nil {
+		return err
+	}
+	// 工具引用到但备份里没有的分类（手工编辑过的备份文件）补建记录，避免分类名对不上
+	if err = ensureToolCatelogs(tx, data.Tools); err != nil {
+		return err
+	}
+	if err = importTools(tx, data.Tools); err != nil {
+		return err
+	}
+	if err = importSearchEngines(tx, data.SearchEngines); err != nil {
+		return err
+	}
+	if err = importProductivity(tx, data); err != nil {
+		return err
+	}
+	// 分类排序统一重排成从 1 开始依次递增，与后台分类管理的规则保持一致
+	if err = renumberCatelogs(tx); err != nil {
+		return err
+	}
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+
+	logger.LogInfo("导入备份数据：工具 %d 条，分类 %d 条，搜索引擎 %d 条，便签版本 %d 条",
+		len(data.Tools), len(data.Catelogs), len(data.SearchEngines), len(data.MemoVersions))
+	// 图片获取比较耗时，放到后台执行，避免阻塞接口
+	go fetchImportedImages(data.Tools, data.SearchEngines)
+	return nil
+}
+
+// importCatelogs 导入分类
+// 工具是按分类名称归属的，所以同名分类直接合并到已有记录上，避免出现重复分类
+func importCatelogs(tx *sql.Tx, catelogs []types.Catelog) error {
+	for _, catelog := range catelogs {
+		name := strings.TrimSpace(catelog.Name)
+		if name == "" {
+			continue
+		}
+		var existId int64
+		err := tx.QueryRow(`SELECT id FROM nav_catelog WHERE name = ?;`, name).Scan(&existId)
+		switch {
+		case err == nil:
+			if _, err = tx.Exec(`UPDATE nav_catelog SET sort = ?, "hide" = ?, "default" = ? WHERE id = ?;`,
+				catelog.Sort, catelog.Hide, catelog.Default, existId); err != nil {
+				return err
+			}
+		case err == sql.ErrNoRows:
+			if _, err = tx.Exec(`INSERT INTO nav_catelog (name, sort, "hide", "default") VALUES (?, ?, ?, ?);`,
+				name, catelog.Sort, catelog.Hide, catelog.Default); err != nil {
+				return err
+			}
+		default:
+			return err
+		}
+	}
+	return nil
+}
+
+// importTools 导入工具：同 id 覆盖，没出现在备份里的工具保持不动
+func importTools(tx *sql.Tx, tools []types.Tool) error {
+	stmt, err := tx.Prepare(`
+		INSERT INTO nav_table (id, name, url, internal_url, logo, logo_name, catelog, "desc", sort, "hide", "default")
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			name = excluded.name,
+			url = excluded.url,
+			internal_url = excluded.internal_url,
+			logo = excluded.logo,
+			logo_name = excluded.logo_name,
+			catelog = excluded.catelog,
+			"desc" = excluded."desc",
+			sort = excluded.sort,
+			"hide" = excluded."hide",
+			"default" = excluded."default";
+		`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, tool := range tools {
+		name := strings.TrimSpace(tool.Name)
+		if name == "" {
+			continue
+		}
+		internalUrl := strings.TrimSpace(tool.InternalUrl)
+		if tool.Id > 0 {
+			if _, err = stmt.Exec(tool.Id, name, tool.Url, internalUrl, tool.Logo, tool.LogoName, tool.Catelog, tool.Desc,
+				tool.Sort, tool.Hide, tool.Default); err != nil {
+				return err
+			}
+			continue
+		}
+		// 手工编辑过的备份可能没有 id，按新增处理，交给自增主键分配
+		if _, err = tx.Exec(`
+			INSERT INTO nav_table (name, url, internal_url, logo, logo_name, catelog, "desc", sort, "hide", "default")
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+			`, name, tool.Url, internalUrl, tool.Logo, tool.LogoName, tool.Catelog, tool.Desc, tool.Sort, tool.Hide, tool.Default); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// importSearchEngines 导入搜索引擎：同 id 覆盖，没出现在备份里的保持不动
+func importSearchEngines(tx *sql.Tx, engines []types.SearchEngine) error {
+	stmt, err := tx.Prepare(`
+		INSERT INTO nav_search_engine (id, name, baseUrl, queryParam, logo, sort, enabled)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			name = excluded.name,
+			baseUrl = excluded.baseUrl,
+			queryParam = excluded.queryParam,
+			logo = excluded.logo,
+			sort = excluded.sort,
+			enabled = excluded.enabled;
+		`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, engine := range engines {
+		name := strings.TrimSpace(engine.Name)
+		if name == "" {
+			continue
+		}
+		if engine.Id > 0 {
+			if _, err = stmt.Exec(engine.Id, name, engine.BaseUrl, engine.QueryParam, engine.Logo,
+				engine.Sort, engine.Enabled); err != nil {
+				return err
+			}
+			continue
+		}
+		if _, err = tx.Exec(`
+			INSERT INTO nav_search_engine (name, baseUrl, queryParam, logo, sort, enabled)
+			VALUES (?, ?, ?, ?, ?, ?);
+			`, name, engine.BaseUrl, engine.QueryParam, engine.Logo, engine.Sort, engine.Enabled); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ensureToolCatelogs 为工具里用到、但备份中没有的分类补建记录（追加到分类列表末尾）
+func ensureToolCatelogs(tx *sql.Tx, tools []types.Tool) error {
+	for _, tool := range tools {
+		name := strings.TrimSpace(tool.Catelog)
+		if name == "" {
+			continue
+		}
+		if _, err := tx.Exec(`
+			INSERT INTO nav_catelog (name, sort, "hide", "default")
+			SELECT ?, (SELECT IFNULL(MAX(sort), 0) + 1 FROM nav_catelog), 0, 0
+			WHERE NOT EXISTS (SELECT 1 FROM nav_catelog WHERE name = ?);
+			`, name, name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// importProductivity 合并导入便签、便签历史版本
+// 与工具/分类的规则一致：现有数据全部保留，只把备份里的内容追加进来（重复的跳过），不整表替换：
+//   - 便签：单文档，没法两份并存。当前便签为空时直接采用备份内容；已有内容时保留当前便签，
+//     把备份内容归档为一条历史版本（便签「历史版本」里可找回/恢复）
+//   - 便签历史版本：逐条追加，内容与创建时间都相同的跳过；追加后超出保留条数的旧版本删除
+//     （与保存便签时的裁剪规则一致，见 MemoVersionLimit）
+func importProductivity(tx *sql.Tx, data types.BackupData) error {
+	if data.Memo != nil {
+		if err := importMemo(tx, *data.Memo); err != nil {
+			return err
+		}
+	}
+	if data.MemoVersions != nil {
+		if err := importMemoVersions(tx, data.MemoVersions); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// importMemo 合并导入便签：当前为空直接采用备份内容，已有内容则保留当前便签、把备份内容归档为历史版本
+func importMemo(tx *sql.Tx, memo types.Memo) error {
+	if strings.TrimSpace(memo.Content) == "" {
+		return nil
+	}
+	var currentContent string
+	err := tx.QueryRow(`SELECT content FROM nav_memo WHERE id = 1;`).Scan(&currentContent)
+	if err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	if strings.TrimSpace(currentContent) == strings.TrimSpace(memo.Content) {
+		// 内容一致，无需处理
+		return nil
+	}
+	now := time.Now().UnixMilli()
+	if strings.TrimSpace(currentContent) == "" {
+		// 当前便签为空：直接采用备份内容
+		updatedAt := memo.UpdatedAt
+		if updatedAt <= 0 {
+			updatedAt = now
+		}
+		_, err = tx.Exec(`INSERT INTO nav_memo (id, content, mode, updated_at) VALUES (1, ?, ?, ?)
+			ON CONFLICT(id) DO UPDATE SET content = excluded.content, mode = excluded.mode, updated_at = excluded.updated_at;`,
+			memo.Content, memoMode(memo.Mode), updatedAt)
+		return err
+	}
+	// 保留当前便签：备份内容归档为一条历史版本，可在便签「历史版本」里找回/恢复
+	createdAt := memo.UpdatedAt
+	if createdAt <= 0 {
+		createdAt = now
+	}
+	// 内容与创建时间都相同的版本已存在时跳过，重复导入同一份备份不会反复归档
+	var existId int64
+	err = tx.QueryRow(`SELECT id FROM nav_memo_version WHERE content = ? AND created_at = ?;`,
+		memo.Content, createdAt).Scan(&existId)
+	if err == nil {
+		return nil
+	}
+	if err != sql.ErrNoRows {
+		return err
+	}
+	_, err = tx.Exec(`INSERT INTO nav_memo_version (content, mode, created_at) VALUES (?, ?, ?);`,
+		memo.Content, memoMode(memo.Mode), createdAt)
+	return err
+}
+
+// importMemoVersions 合并导入便签历史版本：保留现有版本，备份里的版本追加，重复的跳过
+func importMemoVersions(tx *sql.Tx, versions []types.MemoVersion) error {
+	inserted := false
+	for _, v := range versions {
+		if strings.TrimSpace(v.Content) == "" {
+			continue
+		}
+		createdAt := v.CreatedAt
+		if createdAt <= 0 {
+			createdAt = time.Now().UnixMilli()
+		}
+		// 内容与创建时间都相同视为同一条版本，跳过以免重复导入翻倍
+		var existId int64
+		err := tx.QueryRow(`SELECT id FROM nav_memo_version WHERE content = ? AND created_at = ?;`,
+			v.Content, createdAt).Scan(&existId)
+		if err == nil {
+			continue
+		}
+		if err != sql.ErrNoRows {
+			return err
+		}
+		if _, err = tx.Exec(`INSERT INTO nav_memo_version (content, mode, created_at) VALUES (?, ?, ?);`,
+			v.Content, memoMode(v.Mode), createdAt); err != nil {
+			return err
+		}
+		inserted = true
+	}
+	if inserted {
+		// 与保存便签时一致：只保留最近 MemoVersionLimit 条
+		if _, err := tx.Exec(`DELETE FROM nav_memo_version WHERE id NOT IN (
+			SELECT id FROM nav_memo_version ORDER BY created_at DESC, id DESC LIMIT ?);`, MemoVersionLimit); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ==================== 导入后自动获取图片 ====================
+
+// fetchImportedImages 导入后获取图片：备份里只保存了图标网址，这里按网址把图片拿回来
+func fetchImportedImages(tools []types.Tool, engines []types.SearchEngine) {
+	for _, tool := range tools {
+		refreshImportedToolLogo(tool)
+	}
+	for _, engine := range engines {
+		refreshImportedSearchEngineLogo(engine)
+	}
+}
+
+// refreshImportedToolLogo 导入后按统一规则重新获取工具图标
+// logo_name 指向的图片在本机不存在（换机器导入，或备份里只有图标网址）时走 ResolveToolLogo：
+// 先抓网站图标（goscraper），失败用 gstatic 兜底，拿到就下载保存到 data/images（logo 存图标网址、logo_name 存文件名），
+// 都拿不到则两个字段都置空（前台显示默认图标 default.png）
+func refreshImportedToolLogo(tool types.Tool) {
+	if tool.Id <= 0 {
+		return
+	}
+	logo := strings.TrimSpace(tool.Logo)
+	logoName := strings.TrimSpace(tool.LogoName)
+	if !needRefreshToolLogo(logo, logoName) {
+		return
+	}
+	resolved := ResolveToolLogo(tool.Name, tool.Url, logo, logoName)
+	if resolved.Logo == logo && resolved.LogoName == logoName {
+		return
+	}
+	// 只更新图标相关字段，避免覆盖导入后又被改过的其他字段
+	if _, err := database.DB.Exec(`UPDATE nav_table SET logo = ?, logo_name = ? WHERE id = ?;`,
+		resolved.Logo, resolved.LogoName, tool.Id); err != nil {
+		logger.LogError("导入后更新工具图标失败: %s", err)
+		return
+	}
+	// 备份里带过来的本地图片在本机已经不再被这张记录引用（文件名不同等），清理掉，还有别的工具在用时不删
+	RemoveToolLogoIfUnused(logo, logoName)
+}
+
+// refreshImportedSearchEngineLogo 按搜索引擎 logo 网址把外链图片下载保存到本地
+// 网址为空或本地图片在本机不存在（换机器导入）时，重新抓取网站图标再保存
+func refreshImportedSearchEngineLogo(engine types.SearchEngine) {
+	if engine.Id <= 0 {
+		return
+	}
+	logo := strings.TrimSpace(engine.Logo)
+	if logo == "" || needFetchLogo(logo) {
+		logo = fetchSearchEngineIcon(engine.BaseUrl)
+	}
+	if !strings.HasPrefix(logo, "http://") && !strings.HasPrefix(logo, "https://") {
+		return
+	}
+	localUrl, err := SaveSearchEngineLogo(engine.Name, logo)
+	if err != nil {
+		logger.LogError("导入后获取搜索引擎 logo 失败: %s", err)
+		return
+	}
+	if localUrl == "" {
+		return
+	}
+	// 只更新 logo 字段，避免覆盖导入后又被改过的其他字段
+	if _, err = database.DB.Exec(`UPDATE nav_search_engine SET logo = ? WHERE id = ?;`, localUrl, engine.Id); err != nil {
+		logger.LogError("导入后更新搜索引擎 logo 失败: %s", err)
+	}
+}
+
+// fetchSearchEngineIcon 抓取站点图标地址，抓不到时返回空字符串
+func fetchSearchEngineIcon(baseUrl string) string {
+	baseUrl = strings.TrimSpace(baseUrl)
+	if !strings.HasPrefix(baseUrl, "http://") && !strings.HasPrefix(baseUrl, "https://") {
+		return ""
+	}
+	return strings.TrimSpace(GetUrlInfo(baseUrl).Logo)
+}
+
+// needFetchLogo 判断 logo 是否是「本机并不存在的本地图片地址」，这种地址需要重新获取图片
+func needFetchLogo(logo string) bool {
+	return LocalImageName(logo) != "" && !LocalImageExist(logo)
+}

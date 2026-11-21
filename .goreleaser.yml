@@ -1,0 +1,58 @@
+# ============================================================
+# GoReleaser 配置（version 必须为 2，否则 goreleaser-action@v6 会直接报错）
+# CI/CD 构建流程（单文件可执行程序）
+# 前端：ui -> 构建产物输出到 ./public（供 go:embed 使用）
+# 后端：Go 交叉编译为静态二进制
+# ============================================================
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+    # 构建前端（Vite 产物直接输出到 ../public）
+    - npm --prefix ui ci --no-audit --no-fund
+    - npm --prefix ui run build
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    tags:
+      - timetzdata
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}}
+    # v2 中使用 targets 显式列出目标（等价于旧的 goos/goarch + ignore）
+    targets:
+      - linux_amd64
+      - linux_arm64
+      - linux_arm
+      - windows_amd64
+      - darwin_amd64
+      - darwin_arm64
+
+archives:
+  - id: default
+    # 固定产物命名，便于流水线按名字抓取 Linux/Windows 包做二次打包
+    # 命名示例：nav_v1.0.0_linux_amd64.tar.gz / nav_v1.0.0_windows_amd64.zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    # v2 起使用 formats / format_overrides（旧字段 replacements / format 已移除）
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  # v2 起 name_template 已废弃，改用 version_template
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "version"

@@ -1,0 +1,219 @@
+package main
+
+import (
+	"context"
+	"embed"
+	"errors"
+	"flag"
+	"fmt"
+	"net/http"
+	"os"
+	"os/signal"
+	"path"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/gin-contrib/gzip"
+	"github.com/gin-gonic/gin"
+	"github.com/nickkk333/nav/database"
+	"github.com/nickkk333/nav/handler"
+	"github.com/nickkk333/nav/logger"
+	"github.com/nickkk333/nav/middleware"
+	"github.com/nickkk333/nav/service"
+)
+
+const INDEX = "index.html"
+
+// 构建信息，通过 -ldflags "-X main.version=..." 注入
+var (
+	version = "dev"
+	commit  = "none"
+)
+
+//go:embed public
+var fs embed.FS
+
+// binaryFileSystem 把 embed.FS 包装成 http.FileSystem
+type binaryFileSystem struct {
+	fs   http.FileSystem
+	root string
+}
+
+func (b *binaryFileSystem) Open(name string) (http.File, error) {
+	return b.fs.Open(path.Join(b.root, name))
+}
+
+func (b *binaryFileSystem) Exists(prefix string, filepath string) bool {
+	p := strings.TrimPrefix(filepath, prefix)
+	if len(p) >= len(filepath) {
+		return false
+	}
+	name := path.Join(b.root, p)
+	if p == "" {
+		name = path.Join(b.root, INDEX)
+	}
+	if _, err := b.fs.Open(name); err != nil {
+		return false
+	}
+	return true
+}
+
+// BinaryFileSystem 创建内嵌静态文件系统
+func BinaryFileSystem(data embed.FS, root string) *binaryFileSystem {
+	return &binaryFileSystem{
+		fs:   http.FS(data),
+		root: root,
+	}
+}
+
+var port = flag.String("port", "6412", "指定监听端口")
+var addr = flag.String("addr", "0.0.0.0", "指定监听地址")
+
+func main() {
+	flag.Parse()
+
+	database.InitDB()
+
+	// 图片出库：把老库里 nav_img 表的 base64 图片搬到 data/imgcache 文件，全部搬完后删表并回收空间。
+	// 异步执行：图片多时搬迁要一点时间，不阻塞、不影响服务启动；读取侧对未搬完的老表有兜底
+	go service.MigrateImgCacheToFiles()
+
+	// 启动时把当前数据自动导出到 data 目录（文件名 nav-backup.json，同名覆盖）
+	// 异步执行：导出失败只记录日志，不阻塞、不影响服务启动
+	go service.ExportBackupToDataDir()
+
+	// 启动时下载必应每日壁纸到 data 目录，作为前台首页的默认背景图
+	// 异步执行：离线或下载失败时只记录日志，不阻塞、不影响服务启动
+	go service.DownloadBingWallpaper()
+
+	// 每天固定整点（见 bingWallpaperFetchHour）再拉一次，
+	// 覆盖机器长期不重启且无人访问的情况；当天已下载或距离上次失败尝试过近时会跳过
+	go service.StartBingWallpaperScheduler()
+
+	gin.SetMode(gin.ReleaseMode)
+	router := gin.Default()
+	router.Use(gzip.Gzip(gzip.DefaultCompression, gzip.WithExcludedExtensions([]string{".png", ".jpg", ".jpeg", ".webp", ".gif", ".ico", ".svg"})))
+	// 上传图片直接落盘，超过该内存上限的部分写到临时文件
+	router.MaxMultipartMemory = 8 << 20
+
+	// 动态生成的 manifest
+	router.GET("/manifest.json", handler.ManifastHanlder)
+	// 内嵌前端静态资源（单页应用，找不到的路径回落到 index.html）
+	router.Use(Serve("/", BinaryFileSystem(fs, "public")))
+
+	api := router.Group("/api")
+	{
+		// 获取数据的路由
+		api.GET("/", handler.GetAllHandler)
+		// 登录加限流中间件：单 IP 连续失败 10 次后锁定 10 分钟起，防暴力破解
+		// （成功登录会清零，见 handler.LoginHandler）
+		api.POST("/login", middleware.LoginRateLimit(), handler.LoginHandler)
+		api.GET("/logout", handler.LogoutHandler)
+		api.GET("/img", handler.GetLogoImgHandler)
+		// 本地保存的必应每日壁纸（前台未配置背景图时的默认背景）
+		api.GET("/bingWallpaper", handler.GetBingWallpaperHandler)
+		// 必应壁纸的图片描述（供前台搜索框 placeholder 显示）
+		api.GET("/bingWallpaperInfo", handler.GetBingWallpaperInfoHandler)
+		// 后台上传的图片（背景图 / logo 等）
+		api.GET("/uploadedImage/:name", handler.GetUploadedImageHandler)
+
+		// 获取启用的搜索引擎（公开接口）
+		api.GET("/searchEngines", handler.GetEnabledSearchEnginesHandler)
+		// 解析后的默认搜索引擎（公开接口，供前台回车/Ctrl+Enter 使用，即使被禁用也返回设置的默认）
+		api.GET("/searchEngines/default", handler.GetDefaultSearchEngineHandler)
+
+		// 便签附件下载：附件是用 <img>/<a> 直接引用的，浏览器不会带上 Authorization 头，
+		// 所以按公开只读提供；文件名带时间戳与随机串不可枚举（与 /api/uploadedImage/:name 一致）
+		api.GET("/memoFile/:name", handler.GetMemoFileHandler)
+
+		// 便签是私人数据：查看与编辑都需要登录
+		private := api.Group("")
+		private.Use(middleware.JWTMiddleware())
+		{
+			// 便签（单文档整体覆盖 + 历史版本）
+			private.GET("/memo", handler.GetMemoHandler)
+			private.PUT("/memo", handler.SaveMemoHandler)
+			private.GET("/memo/versions", handler.GetMemoVersionsHandler)
+			private.POST("/memo/versions/:id/restore", handler.RestoreMemoVersionHandler)
+			private.DELETE("/memo/versions/:id", handler.DeleteMemoVersionHandler)
+			// 便签附件上传（表单字段名为 file）
+			private.POST("/memo/file", handler.UploadMemoFileHandler)
+		}
+
+		// 管理员用的
+		admin := api.Group("/admin")
+		admin.Use(middleware.JWTMiddleware())
+		{
+			admin.POST("/apiToken", handler.AddApiTokenHandler)
+			admin.DELETE("/apiToken/:id", handler.DeleteApiTokenHandler)
+			admin.GET("/all", handler.GetAdminAllDataHandler)
+
+			admin.GET("/exportTools", handler.ExportToolsHandler)
+			admin.POST("/importTools", handler.ImportToolsHandler)
+
+			// 导入导出：所有工具、分类、搜索引擎与 api token
+			admin.GET("/exportAll", handler.ExportAllHandler)
+			admin.POST("/importAll", handler.ImportAllHandler)
+
+			admin.PUT("/user", handler.UpdateUserHandler)
+			admin.PUT("/setting", handler.UpdateSettingHandler)
+			admin.PUT("/siteConfig", handler.UpdateSiteConfigHandler)
+			// 后台表格隐藏列配置（多设备端同步）
+			admin.PUT("/tableColumns", handler.UpdateAdminTableColumnsHandler)
+			// 图片上传（表单字段名为 file）
+			admin.POST("/uploadImage", handler.UploadImageHandler)
+
+			admin.POST("/tool", handler.AddToolHandler)
+			admin.GET("/urlInfo", handler.GetUrlInfoHandler)
+			admin.DELETE("/tool/:id", handler.DeleteToolHandler)
+			admin.PUT("/tool/:id", handler.UpdateToolHandler)
+			// 给工具上传本地图标（表单字段名为 file）：图片按工具名称命名保存到 data 目录（data/images）
+			admin.POST("/tool/:id/logo", handler.UploadToolLogoHandler)
+			admin.PUT("/tools/sort", handler.UpdateToolsSortHandler)
+
+			admin.POST("/catelog", handler.AddCatelogHandler)
+			admin.DELETE("/catelog/:id", handler.DeleteCatelogHandler)
+			admin.PUT("/catelog/:id", handler.UpdateCatelogHandler)
+			admin.PUT("/catelogs/sort", handler.UpdateCatelogsSortHandler)
+
+			// 搜索引擎管理路由
+			admin.GET("/searchEngine", handler.GetAllSearchEnginesHandler)
+			admin.POST("/searchEngine", handler.AddSearchEngineHandler)
+			admin.POST("/searchEngine/logo", handler.SaveSearchEngineLogoHandler)
+			admin.PUT("/searchEngine/:id", handler.UpdateSearchEngineHandler)
+			admin.DELETE("/searchEngine/:id", handler.DeleteSearchEngineHandler)
+			admin.PUT("/searchEngines/sort", handler.UpdateSearchEngineSortHandler)
+		}
+	}
+
+	listen := fmt.Sprintf("%s:%s", *addr, *port)
+	srv := &http.Server{
+		Addr:         listen,
+		Handler:      router,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	go func() {
+		logger.LogInfo("Nav %s (commit %s) 启动成功，网址: http://localhost:%s", version, commit, *port)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.LogError("应用启动失败，错误: %s", err)
+			os.Exit(1)
+		}
+	}()
+
+	// 优雅退出
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+	<-quit
+	logger.LogInfo("收到退出信号，正在关闭服务...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		logger.LogError("关闭服务失败: %s", err)
+	}
+	logger.LogInfo("服务已退出")
+}

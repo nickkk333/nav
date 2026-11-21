@@ -1,0 +1,13 @@
+**/node_modules
+**/dist
+**/build
+public
+bin
+data
+.dev
+*.log
+*.py
+requirements.txt
+.DS_Store
+.git
+.github

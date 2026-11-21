@@ -1,0 +1,102 @@
+package types
+
+type ResUserDto struct {
+	Name string `json:"name"`
+}
+
+type UpdateUserDto struct {
+	Id       int64  `json:"id"`
+	Name     string `json:"name"`
+	Password string `json:"password"`
+}
+
+type LoginDto struct {
+	Name     string `json:"name"`
+	Password string `json:"password"`
+}
+type AddTokenDto struct {
+	Name string `json:"name"`
+}
+
+type UpdateCatelogDto struct {
+	Id   int    `json:"id"`
+	Name string `json:"name"`
+	Sort int    `json:"sort"`
+	Hide bool   `json:"hide"`
+	// Default 该分类下的工具是否展示在主页默认栏，变化时会同步该分类下所有工具
+	Default bool `json:"default"`
+}
+
+type AddCatelogDto struct {
+	Name string `json:"name"`
+	// Sort 新建分类的落点：-1（默认）或负数排到最后；0 或留空排到最前；正数插入到该序号位置
+	// 落位后由后端把所有分类的排序值统一重排成从 1 开始依次递增
+	Sort int  `json:"sort"`
+	Hide bool `json:"hide"`
+	// Default 该分类下的工具是否展示在主页默认栏
+	Default bool `json:"default"`
+}
+type UpdateToolDto struct {
+	Id   int    `json:"id"`
+	Name string `json:"name"`
+	Url  string `json:"url"`
+	// InternalUrl 内网网址：选填，留空表示没有内网地址（前台点击卡片时优先访问，不通则回退到 Url）
+	InternalUrl string `json:"internalUrl"`
+	// Logo 图标网址（可以下载到图片的 url），留空/外链/本机不存在的本地图片时保存会重新获取
+	Logo string `json:"logo"`
+	// LogoName 保存到 data 目录的图片名（data/images 下的文件名），留空表示还没有本地图片
+	LogoName string `json:"logoName"`
+	Catelog  string `json:"catelog"`
+	Desc     string `json:"desc"`
+	Sort     int    `json:"sort"`
+	Hide     bool   `json:"hide"`
+	Default  bool   `json:"default"`
+}
+type AddToolDto struct {
+	Name string `json:"name"`
+	Url  string `json:"url"`
+	// InternalUrl 内网网址：选填，留空表示没有内网地址（前台点击卡片时优先访问，不通则回退到 Url）
+	InternalUrl string `json:"internalUrl"`
+	// Logo 图标网址（可以下载到图片的 url），留空/外链时保存会按网址自动获取
+	Logo string `json:"logo"`
+	// LogoName 保存到 data 目录的图片名（data/images 下的文件名），留空表示还没有本地图片
+	LogoName string `json:"logoName"`
+	Catelog  string `json:"catelog"`
+	Desc     string `json:"desc"`
+	// Sort 新建工具的落点：-1（默认）或负数排到最后；0 或留空排到最前；正数插入到该序号位置
+	// 落位后由后端把所有工具的排序值统一重排成从 1 开始依次递增
+	Sort    int  `json:"sort"`
+	Hide    bool `json:"hide"`
+	Default bool `json:"default"`
+}
+
+// SaveSearchEngineLogoDto 把搜索引擎 logo 下载保存到本地
+type SaveSearchEngineLogoDto struct {
+	Name string `json:"name"`
+	Logo string `json:"logo"`
+}
+
+type UpdateToolsSortDto struct {
+	Id   int `json:"id"`
+	Sort int `json:"sort"`
+}
+
+// UpdateCatelogsSortDto 批量更新分类排序
+type UpdateCatelogsSortDto struct {
+	Id   int `json:"id"`
+	Sort int `json:"sort"`
+}
+
+// UrlInfoDto 抓取网址得到的信息，用于后台添加工具时自动填充
+type UrlInfoDto struct {
+	Name        string `json:"name"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Logo        string `json:"logo"`
+}
+
+// SaveMemoDto 保存便签：单文档整体覆盖；UpdatedAt 为 0 时由服务端取当前时间
+type SaveMemoDto struct {
+	Content string `json:"content"`
+	Mode    string `json:"mode"`
+}

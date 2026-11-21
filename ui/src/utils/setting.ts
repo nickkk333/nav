@@ -1,0 +1,32 @@
+export type JumpTarget = 'blank' | 'self'
+
+/** 首页每行展示的网站数量默认值（与后端 service.DefaultCardsPerRow 保持一致） */
+export const DEFAULT_CARDS_PER_ROW = 5
+
+/** 首页每行展示的网站数量上限（与后端 service.MaxCardsPerRow 保持一致） */
+export const MAX_CARDS_PER_ROW = 12
+
+/**
+ * 首页默认背景图：未在后台配置背景图时使用的必应每日壁纸
+ * 图片由服务端启动时下载保存到 data 目录（必应壁纸-YYYYMMDD-图片描述.jpg，见 service.bingWallpaperFileName），此处地址与后端路由 /api/bingWallpaper 保持一致
+ */
+export const DEFAULT_BACKGROUND_IMAGE = '/api/bingWallpaper'
+
+const JUMP_TARGET_KEY = 'jumpTarget'
+
+export const setJumpTarget = (target: JumpTarget) => {
+  window.localStorage.setItem(JUMP_TARGET_KEY, target)
+}
+
+export const getJumpTarget = (): JumpTarget => {
+  return (window.localStorage.getItem(JUMP_TARGET_KEY) as JumpTarget) || 'blank'
+}
+
+/** 每次进入首页时，用服务端的「默认跳转方式」同步本地跳转方式 */
+export const initServerJumpTargetConfig = (setting: { jumpTargetBlank?: boolean } | null | undefined) => {
+  if (!setting || setting.jumpTargetBlank === undefined || setting.jumpTargetBlank === true) {
+    setJumpTarget('blank')
+  } else {
+    setJumpTarget('self')
+  }
+}

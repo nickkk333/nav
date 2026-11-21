@@ -1,0 +1,389 @@
+<template>
+  <el-card shadow="never" class="admin-card">
+    <template #header>
+      <div class="card-header">
+        <div class="card-header-left">
+          <span class="card-header-title">{{ `当前共 ${engines.length} 条` }}</span>
+        </div>
+        <div class="card-header-right">
+          <el-button type="primary" :icon="Plus" @click="openAdd">添加搜索引擎</el-button>
+          <el-button :icon="Refresh" @click="loadEngines">刷新</el-button>
+          <TableColumnSettings table-key="searchEngines" :columns="engineColumns" />
+        </div>
+      </div>
+    </template>
+
+    <el-table ref="tableRef" v-loading="loading" :data="engines" row-key="id">
+      <el-table-column v-if="isCol('sort')" label="排序" width="70" align="center">
+        <template #default>
+          <el-icon class="drag-handle"><Rank /></el-icon>
+        </template>
+      </el-table-column>
+      <el-table-column v-if="isCol('logo')" label="Logo" width="80">
+        <template #default="{ row }">
+          <!-- 没填 logo 的搜索引擎在前台会退回默认图标，这里直接显示名称首字符占位图；加载失败也走同一个占位 -->
+          <LogoFallback v-if="!row.logo" class="engine-logo" :name="row.name" />
+          <el-image v-else class="engine-logo" :src="logoUrl(row.logo)" fit="contain" @error="handleLogoError(row.logo)">
+            <template #error>
+              <LogoFallback class="tool-logo-error" :name="row.name" />
+            </template>
+          </el-image>
+        </template>
+      </el-table-column>
+      <el-table-column v-if="isCol('name')" prop="name" label="名称" width="140" />
+      <el-table-column v-if="isCol('baseUrl')" prop="baseUrl" label="基础 URL" min-width="220" show-overflow-tooltip />
+      <el-table-column v-if="isCol('queryParam')" prop="queryParam" label="查询参数" width="120" />
+      <el-table-column v-if="isCol('enabled')" label="启用" width="100">
+        <template #default="{ row }">
+          <el-switch
+            v-model="row.enabled"
+            inline-prompt
+            active-text="开"
+            inactive-text="关"
+            @change="(val: boolean) => handleToggleEnabled(row, val)"
+          />
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" width="150" :fixed="isMobile ? false : 'right'">
+        <template #default="{ row }">
+          <el-button link type="primary" @click="openEdit(row)">修改</el-button>
+          <el-popconfirm :title="`确定要删除 ${row.name} 吗？`" @confirm="handleDelete(row.id)">
+            <template #reference>
+              <el-button link type="danger">删除</el-button>
+            </template>
+          </el-popconfirm>
+        </template>
+      </el-table-column>
+    </el-table>
+  </el-card>
+
+  <el-dialog v-model="showDialog" :title="editing ? '编辑搜索引擎' : '添加搜索引擎'" width="540px" destroy-on-close>
+    <el-form ref="formRef" :model="form" :rules="rules" label-width="100px">
+      <el-form-item label="名称" prop="name">
+        <el-input v-model="form.name" placeholder="例如：百度" />
+      </el-form-item>
+      <el-form-item label="基础 URL" prop="baseUrl">
+        <div class="url-field">
+          <el-input
+            v-model="form.baseUrl"
+            placeholder="例如：https://www.baidu.com/s"
+            @change="autoFillLogo()"
+          >
+            <template #suffix>
+              <el-icon v-if="urlInfoLoading" class="is-loading"><Loading /></el-icon>
+            </template>
+          </el-input>
+          <div class="form-tip">
+            <span>输入基础 URL 后会自动获取图标网址</span>
+            <el-button
+              link
+              type="primary"
+              :disabled="!form.baseUrl"
+              :loading="urlInfoLoading"
+              @click="autoFillLogo()"
+            >
+              重新获取
+            </el-button>
+          </div>
+        </div>
+      </el-form-item>
+      <el-form-item label="查询参数" prop="queryParam">
+        <el-input v-model="form.queryParam" placeholder="例如：wd" />
+      </el-form-item>
+      <el-form-item label="Logo" prop="logo">
+        <div class="url-field">
+          <el-input v-model="form.logo" placeholder="可留空，留空时用名称首字符占位" />
+          <div class="form-tip">
+            <span>填网址时确定后会把图片下载保存到本地，并以搜索引擎名称命名；之后都从本地读取</span>
+          </div>
+          <div class="form-tip">
+            <span>也可以填随站点一起内嵌的图标文件名（例如 /default.png）或者/api/uploadedImage/拼接logo图片名</span>
+          </div>
+        </div>
+      </el-form-item>
+      <el-form-item label="启用">
+        <el-switch v-model="form.enabled" inline-prompt active-text="开" inactive-text="关" />
+      </el-form-item>
+    </el-form>
+<template #footer>
+      <el-button @click="showDialog = false">取消</el-button>
+      <el-button type="primary" :loading="requestLoading" @click="handleSubmit">确定</el-button>
+    </template>
+  </el-dialog>
+</template>
+
+<script setup lang="ts">
+import { onMounted, reactive, ref } from 'vue'
+import { ElMessage } from 'element-plus'
+import { Loading, Plus, Rank, Refresh } from '@element-plus/icons-vue'
+import type { FormInstance, FormRules } from 'element-plus'
+import {
+  fetchAddSearchEngine,
+  fetchDeleteSearchEngine,
+  fetchGetAllSearchEngines,
+  fetchGetUrlInfo,
+  fetchSaveSearchEngineLogo,
+  fetchUpdateSearchEngine,
+  fetchUpdateSearchEnginesSort,
+  resolveError,
+} from '../../api'
+import { useIsMobile } from '../../composables/useIsMobile'
+import { useTableSortable } from '../../composables/useTableSortable'
+import { useTableColumnsStore } from '../../stores/tableColumns'
+import type { TableColumnOption } from '../../stores/tableColumns'
+import TableColumnSettings from '../../components/TableColumnSettings.vue'
+import LogoFallback from '../../components/LogoFallback.vue'
+import { clearSearchEngineCache } from '../../utils/searchEngine'
+import type { SearchEngine } from '../../types'
+
+interface EngineForm {
+  id?: number
+  name: string
+  baseUrl: string
+  queryParam: string
+  logo: string
+  enabled: boolean
+}
+
+const createEmptyForm = (): EngineForm => ({
+  name: '',
+  baseUrl: '',
+  queryParam: '',
+  logo: '',
+  enabled: true,
+})
+
+/** 搜索引擎表格可隐藏的列 */
+const engineColumns: TableColumnOption[] = [
+  { key: 'sort', label: '排序' },
+  { key: 'logo', label: 'Logo' },
+  { key: 'name', label: '名称' },
+  { key: 'baseUrl', label: '基础 URL' },
+  { key: 'queryParam', label: '查询参数' },
+  { key: 'enabled', label: '启用' },
+]
+const cols = useTableColumnsStore()
+const isCol = (key: string) => cols.isVisible('searchEngines', key)
+
+/** 手机布局：操作列不再固定到右侧（固定列会遮住窄屏里本就不多的内容） */
+const isMobile = useIsMobile()
+
+const engines = ref<SearchEngine[]>([])
+const loading = ref(false)
+const requestLoading = ref(false)
+const urlInfoLoading = ref(false)
+const showDialog = ref(false)
+const editing = ref(false)
+const tableRef = ref<any>()
+const formRef = ref<FormInstance>()
+const form = reactive<EngineForm>(createEmptyForm())
+
+const rules: FormRules = {
+  name: [{ required: true, message: '请输入搜索引擎名称', trigger: 'blur' }],
+  baseUrl: [
+    { required: true, message: '请输入基础 URL', trigger: 'blur' },
+    { pattern: /^https?:\/\//, message: '基础 URL 必须以 http:// 或 https:// 开头', trigger: 'blur' },
+  ],
+  queryParam: [{ required: true, message: '请输入查询参数', trigger: 'blur' }],
+  // logo 为选填：留空时后台表格与前台都显示名称首字符占位，填了才校验格式
+  logo: [
+    {
+      validator: (_rule, value: string, callback) => {
+        if (!value) {
+          return callback()
+        }
+        const urlPattern = /^https?:\/\/.+/i
+        const filePattern = /\.(ico|png|jpg|jpeg|gif|svg|webp)$/i
+        if (urlPattern.test(value) || filePattern.test(value)) {
+          return callback()
+        }
+        callback(new Error('请输入有效的网址(http/https)或图标文件名(.ico/.png 等)'))
+      },
+      trigger: 'blur',
+    },
+  ],
+}
+
+/** 静态资源里找不到的图标文件名（理论上只可能是缓存到数据库的历史数据）改走后端缓存代理再试一次 */
+const logoCacheFallback = reactive<Record<string, boolean>>({})
+
+/** 图标地址：外链地址、本机保存的地址（/api/uploadedImage/xxx.png）直接使用；
+ *  只填文件名的内置图标（例如 baidu.ico，图片随前端一起内嵌，源文件在 ui/public）按静态资源路径解析，
+ *  和前台 getLogoUrl 的处理保持一致：这类图标不在数据库图片缓存里，交给 /api/img 取不到图 */
+const logoUrl = (logo: string) => {
+  const value = (logo || '').trim()
+  if (!value) {
+    return ''
+  }
+  if (value.startsWith('http') || value.startsWith('/')) {
+    return value
+  }
+  if (logoCacheFallback[value]) {
+    return `/api/img?url=${encodeURIComponent(value)}`
+  }
+  return `${import.meta.env.BASE_URL}${value}`
+}
+
+/** 静态资源里没有这个文件（历史数据里可能存在缓存在数据库的图标文件名），回落到后端缓存代理（url 需转义，避免 & 截断） */
+const handleLogoError = (logo: string) => {
+  const value = (logo || '').trim()
+  if (!value || value.startsWith('http') || value.startsWith('/')) {
+    return
+  }
+  logoCacheFallback[value] = true
+}
+
+/** 输入基础 URL 后自动获取 logo 网址 */
+const autoFillLogo = async () => {
+  const target = form.baseUrl.trim()
+  if (!target) {
+    return
+  }
+  if (!/^https?:\/\//.test(target)) {
+    ElMessage.warning('基础 URL 必须以 http:// 或 https:// 开头')
+    return
+  }
+  urlInfoLoading.value = true
+  try {
+    const info = await fetchGetUrlInfo(target)
+    const logo = (info?.logo || '').trim()
+    if (logo) {
+      form.logo = logo
+      ElMessage.success('已自动获取 logo 网址')
+    } else {
+      ElMessage.warning('没能读取到网站图标，可以手动填写或留空')
+    }
+  } catch (error) {
+    ElMessage.warning(resolveError(error, '获取 logo 失败'))
+  } finally {
+    urlInfoLoading.value = false
+  }
+}
+
+/** 确定时把外链 logo 下载保存到本地（文件名使用搜索引擎名称） */
+const saveLogoToLocal = async () => {
+  const logo = (form.logo || '').trim()
+  if (!logo.startsWith('http')) {
+    return
+  }
+  try {
+    const localUrl = await fetchSaveSearchEngineLogo({ name: form.name.trim(), logo })
+    if (localUrl) {
+      form.logo = localUrl
+    }
+  } catch (error) {
+    ElMessage.warning(resolveError(error, 'logo 保存到本地失败，将保留原地址'))
+  }
+}
+
+const loadEngines = async () => {
+  loading.value = true
+  try {
+    engines.value = await fetchGetAllSearchEngines()
+  } catch (error) {
+    ElMessage.error(resolveError(error, '加载搜索引擎失败'))
+  } finally {
+    loading.value = false
+  }
+}
+
+// ==================== 拖拽排序 ====================
+
+const persistSort = async (movedId: number, targetId: number) => {
+  const list = [...engines.value]
+  const from = list.findIndex((item) => item.id === movedId)
+  const to = list.findIndex((item) => item.id === targetId)
+  if (from < 0 || to < 0) {
+    return
+  }
+  const [moved] = list.splice(from, 1)
+  list.splice(to, 0, moved)
+  engines.value = list.map((item, index) => ({ ...item, sort: index + 1 }))
+  try {
+    await fetchUpdateSearchEnginesSort(list.map((item, index) => ({ id: item.id, sort: index + 1 })))
+    clearSearchEngineCache()
+    ElMessage.success('排序已更新')
+  } catch (error) {
+    ElMessage.error(resolveError(error, '排序更新失败'))
+    await loadEngines()
+  }
+}
+
+useTableSortable({
+  tableRef,
+  rows: engines,
+  onEnd: (oldIndex, newIndex) => {
+    const moved = engines.value[oldIndex]
+    const target = engines.value[newIndex]
+    if (!moved || !target) {
+      return
+    }
+    persistSort(moved.id, target.id)
+  },
+})
+
+// ==================== 增删改 ====================
+
+const openAdd = () => {
+  editing.value = false
+  Object.assign(form, createEmptyForm())
+  showDialog.value = true
+}
+
+const openEdit = (row: SearchEngine) => {
+  editing.value = true
+  Object.assign(form, createEmptyForm(), row)
+  showDialog.value = true
+}
+
+const handleSubmit = async () => {
+  const valid = await formRef.value?.validate().catch(() => false)
+  if (!valid) {
+    return
+  }
+  requestLoading.value = true
+  try {
+    // 确定时先把外链 logo 下载保存到本地（文件名使用搜索引擎名称）
+    await saveLogoToLocal()
+    if (editing.value) {
+      await fetchUpdateSearchEngine({ ...form })
+      ElMessage.success('更新成功!')
+    } else {
+      await fetchAddSearchEngine({ ...form })
+      ElMessage.success('添加成功!')
+    }
+    clearSearchEngineCache()
+    showDialog.value = false
+    await loadEngines()
+  } catch (error) {
+    ElMessage.warning(resolveError(error, '保存失败'))
+  } finally {
+    requestLoading.value = false
+  }
+}
+
+const handleToggleEnabled = async (row: SearchEngine, enabled: boolean) => {
+  try {
+    await fetchUpdateSearchEngine({ ...row, enabled })
+    clearSearchEngineCache()
+    ElMessage.success(enabled ? '已启用' : '已停用')
+  } catch (error) {
+    row.enabled = !enabled
+    ElMessage.warning(resolveError(error, '操作失败'))
+  }
+}
+
+const handleDelete = async (id: number) => {
+  try {
+    await fetchDeleteSearchEngine(id)
+    clearSearchEngineCache()
+    ElMessage.success('删除成功!')
+  } catch (error) {
+    ElMessage.warning(resolveError(error, '删除失败'))
+  } finally {
+    await loadEngines()
+  }
+}
+
+onMounted(loadEngines)
+</script>

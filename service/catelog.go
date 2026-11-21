@@ -1,0 +1,300 @@
+package service
+
+import (
+	"database/sql"
+	"strings"
+
+	"github.com/nickkk333/nav/database"
+	"github.com/nickkk333/nav/types"
+	"github.com/nickkk333/nav/utils"
+)
+
+// UpdateCatelog 更新分类，事务内任一步失败即回滚并返回 error
+// （老实现用 CheckTxErr 只回滚不中断，后续语句都在已回滚的事务上执行，提交也必然失败）
+func UpdateCatelog(data types.UpdateCatelogDto) error {
+
+	// 查询分类原名称、原有的隐藏状态与默认栏开关
+	sql_select_old_catelog_name := `select name, hide, "default" from nav_catelog where id = ?;`
+	var oldName string
+	var oldHide sql.NullBool
+	var oldDefault sql.NullBool
+	if err := database.DB.QueryRow(sql_select_old_catelog_name, data.Id).Scan(&oldName, &oldHide, &oldDefault); err != nil {
+		return utils.CheckErr(err)
+	}
+
+	// 开启事务
+	tx, err := database.DB.Begin()
+	if err != nil {
+		return utils.CheckErr(err)
+	}
+	// 已提交时 Rollback 是 no-op，失败路径保证事务被回滚
+	defer tx.Rollback()
+
+	// 更新分类新名称
+	if _, err = tx.Exec(`
+		UPDATE nav_catelog
+		SET name = ?, sort = ?, hide = ?, "default" = ?
+		WHERE id = ?;
+		`, data.Name, data.Sort, data.Hide, data.Default, data.Id); err != nil {
+		return utils.CheckErr(err)
+	}
+
+	if oldName != data.Name {
+		// 更新工具分类新名称
+		if _, err = tx.Exec(`
+		UPDATE nav_table
+		SET catelog = ?
+		WHERE catelog = ?;
+		`, data.Name, oldName); err != nil {
+			return utils.CheckErr(err)
+		}
+	}
+
+	// 隐藏状态发生变化时，同步该分类下所有工具的隐藏状态
+	// （改名已在上面完成，这里统一按新名称匹配）
+	if oldHide.Bool != data.Hide {
+		if _, err = tx.Exec(`
+			UPDATE nav_table
+			SET "hide" = ?
+			WHERE catelog = ?;
+			`, data.Hide, data.Name); err != nil {
+			return utils.CheckErr(err)
+		}
+	}
+
+	// 默认栏开关变化时，同步该分类下所有工具的默认状态
+	if oldDefault.Bool != data.Default {
+		if _, err = tx.Exec(`
+			UPDATE nav_table
+			SET "default" = ?
+			WHERE catelog = ?;
+			`, data.Default, data.Name); err != nil {
+			return utils.CheckErr(err)
+		}
+	}
+
+	// 修改后自动重排所有分类的排序值
+	if err = renumberCatelogs(tx); err != nil {
+		return utils.CheckErr(err)
+	}
+
+	// 提交事务
+	return utils.CheckErr(tx.Commit())
+}
+
+// AddCatelog 新增分类
+// 排序规则：-1（默认）或负数排到最后；0 或留空排到最前；正数插入到该序号位置
+// 落位完成后把所有分类的排序值重排成从 1 开始依次递增
+func AddCatelog(data types.AddCatelogDto) {
+	// 检查分类名称是否为空，如果为空则不创建
+	if data.Name == "" || strings.TrimSpace(data.Name) == "" {
+		return
+	}
+
+	// 先检查重复不重复
+	existCatelogs := GetAllCatelog()
+	var existCatelogsArr []string
+	for _, catelogDto := range existCatelogs {
+		existCatelogsArr = append(existCatelogsArr, catelogDto.Name)
+	}
+	if utils.In(data.Name, existCatelogsArr) {
+		return
+	}
+
+	tx, err := database.DB.Begin()
+	if err != nil {
+		utils.CheckErr(err)
+		return
+	}
+	defer tx.Rollback()
+
+	// 先取出当前所有分类 id（按排序升序），用于计算新分类的落点
+	rows, err := tx.Query(`SELECT id FROM nav_catelog ORDER BY sort, id;`)
+	if err != nil {
+		utils.CheckErr(err)
+		return
+	}
+	ids := make([]int64, 0)
+	for rows.Next() {
+		var eachId int64
+		if err = rows.Scan(&eachId); err != nil {
+			utils.CheckErr(err)
+			rows.Close()
+			return
+		}
+		ids = append(ids, eachId)
+	}
+	rows.Close()
+
+	res, err := tx.Exec(`
+		INSERT INTO nav_catelog (name, sort, hide, "default")
+		VALUES (?, ?, ?, ?);
+		`, data.Name, data.Sort, data.Hide, data.Default)
+	if err != nil {
+		utils.CheckErr(err)
+		return
+	}
+
+	id, err := res.LastInsertId()
+	if err != nil {
+		utils.CheckErr(err)
+		return
+	}
+
+	// 把新分类插到目标位置，再把所有排序值重写成 1 开始依次递增
+	index := ResolveToolInsertIndex(data.Sort, len(ids))
+	ordered := make([]int64, 0, len(ids)+1)
+	ordered = append(ordered, ids[:index]...)
+	ordered = append(ordered, id)
+	ordered = append(ordered, ids[index:]...)
+
+	stmt, err := tx.Prepare(`UPDATE nav_catelog SET sort = ? WHERE id = ?;`)
+	if err != nil {
+		utils.CheckErr(err)
+		return
+	}
+	defer stmt.Close()
+	for i, eachId := range ordered {
+		if _, err = stmt.Exec(i+1, eachId); err != nil {
+			utils.CheckErr(err)
+			return
+		}
+	}
+
+	err = tx.Commit()
+	utils.CheckErr(err)
+}
+
+// DeleteCatelog 删除分类，同时删除该分类下的所有工具
+func DeleteCatelog(id string) error {
+	// 查询分类名称，用于同步删除该分类下的工具
+	var name string
+	err := database.DB.QueryRow(`SELECT name FROM nav_catelog WHERE id = ?;`, id).Scan(&name)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	tx, err := database.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// 名称为空的分类不涉及工具，避免误删「未分类」的工具
+	if strings.TrimSpace(name) != "" {
+		if _, err = tx.Exec(`DELETE FROM nav_table WHERE catelog = ?;`, name); err != nil {
+			return err
+		}
+	}
+	if _, err = tx.Exec(`DELETE FROM nav_catelog WHERE id = ?;`, id); err != nil {
+		return err
+	}
+	// 删除后自动重排剩余分类的排序值
+	if err = renumberCatelogs(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// renumberCatelogs 按当前顺序把所有分类的排序值重排成从 1 开始依次递增
+func renumberCatelogs(tx *sql.Tx) error {
+	rows, err := tx.Query(`SELECT id FROM nav_catelog ORDER BY sort, id;`)
+	if err != nil {
+		return err
+	}
+	ids := make([]int64, 0)
+	for rows.Next() {
+		var eachId int64
+		if err = rows.Scan(&eachId); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, eachId)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return err
+	}
+
+	stmt, err := tx.Prepare(`UPDATE nav_catelog SET sort = ? WHERE id = ?;`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for i, eachId := range ids {
+		if _, err = stmt.Exec(i+1, eachId); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// UpdateCatelogsSort 批量更新分类排序
+func UpdateCatelogsSort(updates []types.UpdateCatelogsSortDto) error {
+	tx, err := database.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`UPDATE nav_catelog SET sort = ? WHERE id = ?`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, update := range updates {
+		if _, err = stmt.Exec(update.Sort, update.Id); err != nil {
+			return err
+		}
+	}
+	// 排序后自动把所有分类的排序值重排成从 1 开始依次递增
+	if err = renumberCatelogs(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func GetAllCatelog() []types.Catelog {
+	sql_get_all := `
+		SELECT id,name,sort,hide,"default" FROM nav_catelog order by sort, id;
+	`
+	results := make([]types.Catelog, 0)
+	rows, err := database.DB.Query(sql_get_all)
+	if err != nil {
+		// Query 失败时 rows 为 nil，老代码直接 rows.Next() 会 panic
+		utils.CheckErr(err)
+		return results
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var catelog types.Catelog
+		var (
+			sortVal    sql.NullInt64
+			hide       sql.NullBool
+			defaultVal sql.NullBool
+		)
+		err = rows.Scan(&catelog.Id, &catelog.Name, &sortVal, &hide, &defaultVal)
+		utils.CheckErr(err)
+		catelog.Sort = int(sortVal.Int64)
+		catelog.Hide = hide.Bool
+		catelog.Default = defaultVal.Bool
+		results = append(results, catelog)
+	}
+	return results
+}
+
+// ToCatelogNames 把分类转成名称数组（前台标签使用）
+func ToCatelogNames(catelogs []types.Catelog) []string {
+	names := make([]string, 0, len(catelogs))
+	for _, catelog := range catelogs {
+		if strings.TrimSpace(catelog.Name) == "" {
+			continue
+		}
+		names = append(names, catelog.Name)
+	}
+	return names
+}
