@@ -4,8 +4,8 @@
       <div class="admin-header-title">Nav 管理系统</div>
       <div class="admin-header-actions">
         <el-button link :icon="HomeFilled" @click="router.push('/')">返回主页</el-button>
-        <el-button link :icon="InfoFilled" @click="router.push('/about')">关于应用</el-button>
         <el-button link :icon="SwitchButton" @click="handleLogout">退出登录</el-button>
+        <el-button link :icon="InfoFilled" @click="router.push('/about')">关于应用</el-button>
       </div>
     </el-header>
     <div class="admin-body">
