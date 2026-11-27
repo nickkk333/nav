@@ -139,6 +139,9 @@ components:
           type: boolean
         hideMemo:
           type: boolean
+        hideCatelogNav:
+          type: boolean
+          description: 首页顶部是否隐藏分类导航（打开后前台不渲染分类标签栏）
 
         jumpTargetBlank:
           type: boolean

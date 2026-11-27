@@ -46,29 +46,13 @@
         <template #header>
           <span class="column-with-tip">
             隐藏
-            <el-tooltip content="开启后只有登录后才会展示该分类下的工具，且该分类下的工具会一起被隐藏" placement="top">
+            <el-tooltip content="开启后主页不再展示该分类及其下的工具（登录与否都一样），后台管理仍可见；该分类下的工具会一起被隐藏" placement="top">
               <el-icon><QuestionFilled /></el-icon>
             </el-tooltip>
           </span>
         </template>
         <template #default="{ row }">
           <el-switch v-model="row.hide" inline-prompt active-text="开" inactive-text="关" @change="saveRow(row)" />
-        </template>
-      </el-table-column>
-      <el-table-column v-if="isCol('default')" width="76" align="center">
-        <template #header>
-          <span class="column-with-tip">
-            默认
-            <el-tooltip
-              content="开启后该分类下的工具都会展示在主页默认栏；切换后会同步设置该分类下所有工具的默认状态"
-              placement="top"
-            >
-              <el-icon><QuestionFilled /></el-icon>
-            </el-tooltip>
-          </span>
-        </template>
-        <template #default="{ row }">
-          <el-switch v-model="row.default" inline-prompt active-text="开" inactive-text="关" @change="saveRow(row)" />
         </template>
       </el-table-column>
       <el-table-column label="操作" width="140" :fixed="isMobile ? false : 'right'">
@@ -105,13 +89,8 @@
         </el-tooltip>
       </el-form-item>
       <el-form-item label="隐藏">
-        <el-tooltip content="开启后只有登录后才会展示该分类下的工具，同时该分类下的工具都会被隐藏" placement="top">
+        <el-tooltip content="开启后主页不再展示该分类及其下的工具（登录与否都一样），后台管理仍可见；该分类下的工具会一起被隐藏" placement="top">
           <el-switch v-model="addForm.hide" inline-prompt active-text="开" inactive-text="关" />
-        </el-tooltip>
-      </el-form-item>
-      <el-form-item label="默认">
-        <el-tooltip content="开启后该分类下的工具都会展示在主页默认栏" placement="top">
-          <el-switch v-model="addForm.default" inline-prompt active-text="开" inactive-text="关" />
         </el-tooltip>
       </el-form-item>
     </el-form>
@@ -158,7 +137,6 @@ const catelogColumns: TableColumnOption[] = [
   { key: 'sort', label: '排序' },
   { key: 'name', label: '名称' },
   { key: 'hide', label: '隐藏' },
-  { key: 'default', label: '默认' },
 ]
 const cols = useTableColumnsStore()
 const isCol = (key: string) => cols.isVisible('categories', key)

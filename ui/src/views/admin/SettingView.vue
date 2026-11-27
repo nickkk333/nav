@@ -119,6 +119,11 @@
             <el-switch v-model="settingForm.hideMemo" inline-prompt active-text="开" inactive-text="关" />
           </el-tooltip>
         </el-form-item>
+        <el-form-item label="隐藏分类导航">
+          <el-tooltip content="默认展示，开启后前台首页不再显示顶部的分类标签栏（直接从页面中移除）" placement="top">
+            <el-switch v-model="settingForm.hideCatelogNav" inline-prompt active-text="开" inactive-text="关" />
+          </el-tooltip>
+        </el-form-item>
         <el-form-item>
           <el-button type="primary" :loading="requestLoading" @click="handleUpdateSetting">提交</el-button>
         </el-form-item>
@@ -177,6 +182,7 @@ const defaultSettingForm = () => ({
   hideAdmin: false,
   hideGithub: false,
   hideMemo: false,
+  hideCatelogNav: false,
   jumpTargetBlank: true,
   backgroundImage: '',
   defaultLogo: '',

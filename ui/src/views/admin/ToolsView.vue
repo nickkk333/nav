@@ -181,26 +181,13 @@
         <template #header>
           <span class="column-with-tip">
             隐藏
-            <el-tooltip content="开启后只有登录后才会展示该工具" placement="top">
+            <el-tooltip content="开启后主页不再展示该工具（登录与否都一样），后台管理仍可见" placement="top">
               <el-icon><QuestionFilled /></el-icon>
             </el-tooltip>
           </span>
         </template>
         <template #default="{ row }">
           <el-switch v-model="row.hide" inline-prompt active-text="开" inactive-text="关" @change="saveRow(row)" />
-        </template>
-      </el-table-column>
-      <el-table-column v-if="isCol('default')" width="76" align="center">
-        <template #header>
-          <span class="column-with-tip">
-            默认
-            <el-tooltip content="开启后在默认页展示" placement="top">
-              <el-icon><QuestionFilled /></el-icon>
-            </el-tooltip>
-          </span>
-        </template>
-        <template #default="{ row }">
-          <el-switch v-model="row.default" inline-prompt active-text="开" inactive-text="关" @change="saveRow(row)" />
         </template>
       </el-table-column>
       <el-table-column label="操作" width="140" :fixed="isMobile ? false : 'right'">
@@ -289,13 +276,8 @@
         </el-tooltip>
       </el-form-item>
       <el-form-item label="隐藏">
-        <el-tooltip content="开启后只有登录后才会展示该工具" placement="top">
+        <el-tooltip content="开启后主页不再展示该工具（登录与否都一样），后台管理仍可见" placement="top">
           <el-switch v-model="addForm.hide" inline-prompt active-text="开" inactive-text="关" />
-        </el-tooltip>
-      </el-form-item>
-      <el-form-item label="默认">
-        <el-tooltip content="开启后在默认页展示" placement="top">
-          <el-switch v-model="addForm.default" inline-prompt active-text="开" inactive-text="关" />
         </el-tooltip>
       </el-form-item>
     </el-form>
@@ -378,7 +360,6 @@ const toolColumns: TableColumnOption[] = [
   { key: 'logo', label: 'logo 网址' },
   { key: 'logoName', label: 'logo 图片名' },
   { key: 'hide', label: '隐藏' },
-  { key: 'default', label: '默认' },
 ]
 const cols = useTableColumnsStore()
 /** 绑定工具表的列可见性判断：v-if="isCol('name')" */

@@ -4,17 +4,19 @@ import "encoding/json"
 
 // 默认是 0
 type Setting struct {
-	Id                   int    `json:"id"`
-	Favicon              string `json:"favicon"`
-	Title                string `json:"title"`
-	GovRecord            string `json:"govRecord"`
-	Logo192              string `json:"logo192"`
-	Logo512              string `json:"logo512"`
-	HideAdmin            bool   `json:"hideAdmin"`
-	HideGithub           bool   `json:"hideGithub"`
+	Id         int    `json:"id"`
+	Favicon    string `json:"favicon"`
+	Title      string `json:"title"`
+	GovRecord  string `json:"govRecord"`
+	Logo192    string `json:"logo192"`
+	Logo512    string `json:"logo512"`
+	HideAdmin  bool   `json:"hideAdmin"`
+	HideGithub bool   `json:"hideGithub"`
 	// HideMemo 首页便签入口显隐（类似 Github 按钮的开关，默认显示）
-	HideMemo             bool   `json:"hideMemo"`
-	JumpTargetBlank      bool   `json:"jumpTargetBlank"`
+	HideMemo bool `json:"hideMemo"`
+	// HideCatelogNav 首页顶部分类导航显隐（开关打开时前台不再渲染分类标签栏，默认显示）
+	HideCatelogNav  bool `json:"hideCatelogNav"`
+	JumpTargetBlank bool `json:"jumpTargetBlank"`
 	// BackgroundImage 首页背景图地址：后台上传返回的 url 或外链地址，留空时前台使用必应每日壁纸作为背景
 	BackgroundImage string `json:"backgroundImage"`
 	// DefaultLogo 默认图标地址：后台上传返回的 url 或外链地址，相当于替换内置的 default.png
@@ -106,12 +108,12 @@ type BackupData struct {
 	// Version 备份文件格式版本
 	Version int `json:"version"`
 	// ExportedAt 导出时间（RFC3339）
-	ExportedAt     string          `json:"exportedAt"`
-	Tools          []Tool          `json:"tools"`
-	Catelogs       []Catelog       `json:"catelogs"`
-	SearchEngines  []SearchEngine  `json:"searchEngines"`
-	Memo           *Memo           `json:"memo"`
-	MemoVersions   []MemoVersion   `json:"memoVersions"`
+	ExportedAt    string         `json:"exportedAt"`
+	Tools         []Tool         `json:"tools"`
+	Catelogs      []Catelog      `json:"catelogs"`
+	SearchEngines []SearchEngine `json:"searchEngines"`
+	Memo          *Memo          `json:"memo"`
+	MemoVersions  []MemoVersion  `json:"memoVersions"`
 	// Todos 老备份（格式版本 3 及更早）里的待办数据：待办功能已移除，不导出也不导入，
 	// 保留这个字段只是为了把老备份识别成「有内容的备份」而不是空文件
 	Todos json.RawMessage `json:"todos,omitempty"`

@@ -19,7 +19,7 @@ const (
 // GetSetting 获取网站设置
 func GetSetting() types.Setting {
 	row := database.DB.QueryRow(`
-		SELECT id, favicon, title, govRecord, logo192, logo512, hideAdmin, hideGithub, hideMemo, jumpTargetBlank, backgroundImage, defaultLogo, defaultSearchEngine, colorTheme, cardShowDuration
+		SELECT id, favicon, title, govRecord, logo192, logo512, hideAdmin, hideGithub, hideMemo, hideCatelogNav, jumpTargetBlank, backgroundImage, defaultLogo, defaultSearchEngine, colorTheme, cardShowDuration
 		FROM nav_setting
 		ORDER BY id ASC
 		LIMIT 1;
@@ -29,6 +29,7 @@ func GetSetting() types.Setting {
 		hideAdmin           sql.NullBool
 		hideGithub          sql.NullBool
 		hideMemo            sql.NullBool
+		hideCatelogNav      sql.NullBool
 		jumpTargetBlank     sql.NullBool
 		backgroundImage     sql.NullString
 		defaultLogo         sql.NullString
@@ -37,7 +38,7 @@ func GetSetting() types.Setting {
 		cardShowDuration    sql.NullInt64
 	)
 	err := row.Scan(&setting.Id, &setting.Favicon, &setting.Title, &setting.GovRecord, &setting.Logo192, &setting.Logo512,
-		&hideAdmin, &hideGithub, &hideMemo, &jumpTargetBlank, &backgroundImage, &defaultLogo, &defaultSearchEngine,
+		&hideAdmin, &hideGithub, &hideMemo, &hideCatelogNav, &jumpTargetBlank, &backgroundImage, &defaultLogo, &defaultSearchEngine,
 		&colorTheme, &cardShowDuration)
 	if err != nil {
 		logger.LogError("获取配置失败: %s", err)
@@ -51,6 +52,7 @@ func GetSetting() types.Setting {
 			HideAdmin:           false,
 			HideGithub:          false,
 			HideMemo:            false,
+			HideCatelogNav:      false,
 			JumpTargetBlank:     true,
 			BackgroundImage:     "",
 			DefaultLogo:         "",
@@ -63,6 +65,8 @@ func GetSetting() types.Setting {
 	setting.HideGithub = hideGithub.Bool
 	// 未设置时首页显示便签入口
 	setting.HideMemo = hideMemo.Bool
+	// 未设置时首页显示顶部分类导航
+	setting.HideCatelogNav = hideCatelogNav.Bool
 	// 未设置时默认新标签页打开
 	setting.JumpTargetBlank = true
 	if jumpTargetBlank.Valid {
@@ -94,10 +98,10 @@ func GetSetting() types.Setting {
 func UpdateSetting(data types.Setting) error {
 	_, err := database.DB.Exec(`
 		UPDATE nav_setting
-		SET favicon = ?, title = ?, govRecord = ?, logo192 = ?, logo512 = ?, hideAdmin = ?, hideGithub = ?, hideMemo = ?, jumpTargetBlank = ?, backgroundImage = ?, defaultLogo = ?, defaultSearchEngine = ?, colorTheme = ?, cardShowDuration = ?
+		SET favicon = ?, title = ?, govRecord = ?, logo192 = ?, logo512 = ?, hideAdmin = ?, hideGithub = ?, hideMemo = ?, hideCatelogNav = ?, jumpTargetBlank = ?, backgroundImage = ?, defaultLogo = ?, defaultSearchEngine = ?, colorTheme = ?, cardShowDuration = ?
 		WHERE id = (SELECT id FROM nav_setting ORDER BY id ASC LIMIT 1);
 		`, data.Favicon, data.Title, data.GovRecord, data.Logo192, data.Logo512,
-		data.HideAdmin, data.HideGithub, data.HideMemo, data.JumpTargetBlank, data.BackgroundImage, data.DefaultLogo,
+		data.HideAdmin, data.HideGithub, data.HideMemo, data.HideCatelogNav, data.JumpTargetBlank, data.BackgroundImage, data.DefaultLogo,
 		data.DefaultSearchEngine, data.ColorTheme, data.CardShowDuration)
 	return err
 }

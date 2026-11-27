@@ -11,7 +11,12 @@
           @update:model-value="onSearchInput"
           @search="onSearchSubmit"
         />
-        <TagSelector :tags="tags" :curr-tag="currTag" @change="handleSetCurrTag" />
+        <TagSelector
+          v-if="showCatelogNav"
+          :tags="tags"
+          :curr-tag="currTag"
+          @change="handleSetCurrTag"
+        />
         <div v-if="editMode" class="edit-mode-bar">
           <span class="edit-mode-text">设置模式：拖动卡片排序，点击卡片右上角 × 删除</span>
           <button type="button" class="edit-mode-done" @click="exitEditMode">完成</button>
@@ -108,16 +113,17 @@ import {
 import { memoExpanded } from '../utils/memoWindow'
 import type { Tool } from '../types'
 
+const site = useSiteStore()
+
 const DEFAULT_TAG = '默认'
 const ADMIN_TAG = '管理后台'
 
-const site = useSiteStore()
-
 const searchText = ref('')
 const searchString = ref('')
+// 当前选中的分类标签（顶部分类导航）；导航被后台隐藏时固定为「默认」
+const currTag = ref(DEFAULT_TAG)
 // 搜索框提示语（置灰 placeholder）：默认提示，背景使用必应壁纸时换成当天壁纸的图片描述
 const searchPlaceholder = ref('按任意键直接开始搜索')
-const currTag = ref(DEFAULT_TAG)
 const engineCards = ref<Tool[]>([])
 const loading = ref(true)
 
@@ -278,6 +284,8 @@ const submitSearch = async () => {
 }
 
 const setting = computed(() => site.data.setting)
+/** 后台「隐藏分类导航」开关：关闭时渲染顶部标签栏，打开时用 v-if 直接从 DOM 移除 */
+const showCatelogNav = computed(() => setting.value.hideCatelogNav !== true)
 const siteConfig = computed(() => site.data.siteConfig)
 const isSearching = computed(() => searchString.value.trim() !== '')
 const showGithub = computed(() => setting.value.hideGithub !== true)
@@ -337,9 +345,9 @@ const localToolResults = computed<Tool[]>(() => {
   const tools = site.data.tools ?? []
   const searching = isSearching.value
   return tools.filter((item) => {
-    // 搜索时在所有工具中查找，否则按当前分类过滤
+    // 搜索时在所有工具中查找；未搜索时按当前分类过滤（分类导航隐藏或选中「默认」时只展示默认栏）
     if (!searching) {
-      if (currTag.value === DEFAULT_TAG) {
+      if (!showCatelogNav.value || currTag.value === DEFAULT_TAG) {
         return item.default === true
       }
       return item.catelog === currTag.value
@@ -625,8 +633,9 @@ const onSearchInput = (value: string) => {
 const resetSearch = (notSetTag = false) => {
   searchText.value = ''
   searchString.value = ''
+  if (!showCatelogNav.value || notSetTag) return
   const tagInLocalStorage = window.localStorage.getItem('tag')
-  if (!notSetTag && tagInLocalStorage && tagInLocalStorage !== '' && tagInLocalStorage !== ADMIN_TAG) {
+  if (tagInLocalStorage && tagInLocalStorage !== '' && tagInLocalStorage !== ADMIN_TAG) {
     currTag.value = tagInLocalStorage
   }
 }
@@ -640,6 +649,13 @@ watch(memoExpanded, (expanded) => {
     return
   }
   if (searchText.value && !searchString.value) resetSearch()
+})
+
+// 后台开启「隐藏分类导航」时回到默认栏，避免停留在不可见的分类过滤状态
+watch(showCatelogNav, (visible) => {
+  if (!visible) {
+    currTag.value = DEFAULT_TAG
+  }
 })
 
 const handleSetCurrTag = (tag: string) => {
@@ -742,9 +758,12 @@ const init = async () => {
     initServerJumpTargetConfig(site.data.setting)
     // 配色主题由管理页系统配置统一下发，覆盖首屏的本地缓存值
     setColorTheme(site.data.setting.colorTheme)
-    const tagInLocalStorage = window.localStorage.getItem('tag')
-    if (tagInLocalStorage && (site.data.catelogs ?? []).includes(tagInLocalStorage)) {
-      currTag.value = tagInLocalStorage
+    // 分类导航被后台隐藏时不恢复上次选中的分类，避免停留在不可见的过滤状态
+    if (showCatelogNav.value) {
+      const tagInLocalStorage = window.localStorage.getItem('tag')
+      if (tagInLocalStorage && (site.data.catelogs ?? []).includes(tagInLocalStorage)) {
+        currTag.value = tagInLocalStorage
+      }
     }
     applySiteMeta()
     // 搜索框 placeholder 换成必应壁纸的图片描述：不阻塞首屏，异步拿到再替换

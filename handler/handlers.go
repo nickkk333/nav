@@ -275,13 +275,10 @@ func GetAllHandler(c *gin.Context) {
 	tools := service.GetAllTool()
 	// 获取全部数据
 	catelogs := service.GetAllCatelog()
-	if !utils.IsLogin(c) {
-		// 过滤掉隐藏工具
-		tools = utils.FilterHideTools(tools, catelogs)
-
-		// 过滤掉隐藏分类
-		catelogs = utils.FilterHideCates(catelogs)
-	}
+	// 隐藏字段为 true 的工具 / 分类在主页始终不展示（登录与否都一样）；
+	// 后台管理走 /api/admin/all，不受这里影响，隐藏的工具和分类仍可在后台管理
+	tools = utils.FilterHideTools(tools, catelogs)
+	catelogs = utils.FilterHideCates(catelogs)
 	setting := service.GetSetting()
 	siteConfig := service.GetSiteConfig()
 	c.JSON(200, gin.H{

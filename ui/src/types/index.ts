@@ -47,6 +47,8 @@ export interface Setting {
   hideGithub: boolean
   /** 前台首页是否隐藏便签入口（类似 Github 按钮开关，默认显示） */
   hideMemo: boolean
+  /** 前台首页是否隐藏顶部分类导航（打开后首页不渲染分类标签栏） */
+  hideCatelogNav: boolean
   jumpTargetBlank: boolean
   /** 首页背景图地址（后台上传返回的 url 或外链地址），留空时前台使用必应每日壁纸作为背景 */
   backgroundImage: string

@@ -227,7 +227,7 @@ body {
   color: var(--el-text-color-placeholder);
 }
 
-/* 首页卡片默认隐藏状态：隐藏分类、卡片与备案，只留搜索框与浮窗 */
+/* 首页卡片默认隐藏状态：隐藏分类导航、卡片与备案，只留搜索框与浮窗 */
 .main.hide-content .tag-selector,
 .main.hide-content .content-wraper,
 .main.hide-content .record-wraper {

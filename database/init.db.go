@@ -71,6 +71,7 @@ func InitDB() {
 		hideAdmin BOOLEAN,
 		hideGithub BOOLEAN,
 		hideMemo BOOLEAN,
+		hideCatelogNav BOOLEAN,
 		jumpTargetBlank BOOLEAN,
 		backgroundImage TEXT,
 		defaultLogo TEXT,
@@ -105,6 +106,10 @@ func InitDB() {
 	// 设置表表结构升级-首页便签入口显隐（类似 Github 按钮开关，默认显示）
 	if !columnExists("nav_setting", "hideMemo") {
 		DB.Exec(`ALTER TABLE nav_setting ADD COLUMN hideMemo BOOLEAN;`)
+	}
+	// 设置表表结构升级-首页顶部分类导航显隐（默认显示，开关打开时前台不渲染分类标签栏）
+	if !columnExists("nav_setting", "hideCatelogNav") {
+		DB.Exec(`ALTER TABLE nav_setting ADD COLUMN hideCatelogNav BOOLEAN;`)
 	}
 	// 设置表表结构升级-20250923【首页背景图，存放后台上传返回的 url 或外链地址】
 	if !columnExists("nav_setting", "backgroundImage") {
@@ -350,9 +355,9 @@ func InitDB() {
 	}
 	if !rows.Next() {
 		if _, err = DB.Exec(`
-			INSERT INTO nav_setting (favicon, title, govRecord, logo192, logo512, hideAdmin, hideGithub, hideMemo, jumpTargetBlank)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-			`, "favicon.ico", "Nav", "", "logo192.png", "logo512.png", false, false, false, true); err != nil {
+			INSERT INTO nav_setting (favicon, title, govRecord, logo192, logo512, hideAdmin, hideGithub, hideMemo, hideCatelogNav, jumpTargetBlank)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+			`, "favicon.ico", "Nav", "", "logo192.png", "logo512.png", false, false, false, false, true); err != nil {
 			utils.CheckErr(err)
 		}
 	}
