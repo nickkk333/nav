@@ -28,6 +28,12 @@ type Setting struct {
 	ColorTheme string `json:"colorTheme"`
 	// CardShowDuration 鼠标活动后卡片与分类名的持续显示时间（秒），默认 5
 	CardShowDuration int `json:"cardShowDuration"`
+	// MemoFileDir 便签附件的存储目录：留空使用默认 ./data/memo-files；
+	// 可填相对进程工作目录的路径或绝对路径，保存时自动创建目录
+	MemoFileDir string `json:"memoFileDir"`
+	// BingWallpaperDir 必应每日壁纸的存储目录：留空使用默认 ./data；
+	// 可填相对进程工作目录的路径或绝对路径，保存时自动创建目录
+	BingWallpaperDir string `json:"bingWallpaperDir"`
 }
 
 type Token struct {

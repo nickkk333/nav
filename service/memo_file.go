@@ -17,8 +17,6 @@ import (
 // ==================== 便签附件（上传文件 / 粘贴图片） ====================
 
 const (
-	// MemoFileDir 便签附件的存放目录（在 data 目录下，docker 部署时挂载 ./data 即可持久化）
-	MemoFileDir = "./data/memo-files"
 	// MemoFileUrlPrefix 便签附件的访问前缀，需与 main.go 中的路由保持一致
 	MemoFileUrlPrefix = "/api/memoFile/"
 	// MaxMemoFileSize 单个附件的大小上限：100MB
@@ -71,8 +69,9 @@ func SaveMemoFile(file *multipart.FileHeader) (MemoFileResult, error) {
 	base := SafeImageFileName(strings.TrimSuffix(original, filepath.Ext(original)), "file")
 	// 文件名带时间戳与随机串：既避免重名覆盖，也让公开的附件地址无法被枚举
 	name := fmt.Sprintf("%s%d_%s_%s%s", memoFilePrefix, time.Now().UnixNano(), memoFileRandom(), base, ext)
-	utils.PathExistsOrCreate(MemoFileDir)
-	if err := copyUploadedFile(file, filepath.Join(MemoFileDir, name)); err != nil {
+	dir := MemoFileDir()
+	utils.PathExistsOrCreate(dir)
+	if err := copyUploadedFile(file, filepath.Join(dir, name)); err != nil {
 		logger.LogError("保存便签附件失败: %s", err)
 		return MemoFileResult{}, fmt.Errorf("保存文件失败")
 	}
@@ -102,7 +101,7 @@ func GetMemoFilePath(name string) (string, bool) {
 	if !isSafeMemoFileName(name) {
 		return "", false
 	}
-	path := filepath.Join(MemoFileDir, name)
+	path := filepath.Join(MemoFileDir(), name)
 	info, err := os.Stat(path)
 	if err != nil || info.IsDir() {
 		return "", false
@@ -130,7 +129,7 @@ func MemoFileDownloadName(name string) string {
 	return rest
 }
 
-// isSafeMemoFileName 校验文件名：只能是 MemoFileDir 下的文件，避免路径穿越。
+// isSafeMemoFileName 校验文件名：只能是便签附件存储目录下的文件，避免路径穿越。
 // 不含路径分隔符时（filepath.Base 与 ContainsAny 两重校验）".." 只是普通字符、无法穿越目录，
 // 故不再额外拒绝：兼容早期由长文件名截断产生、名称里含 ".." 的历史附件，保证仍能预览
 func isSafeMemoFileName(name string) bool {

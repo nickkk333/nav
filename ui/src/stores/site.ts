@@ -23,6 +23,8 @@ const defaultSetting: Setting = {
   defaultSearchEngine: 0,
   colorTheme: 'auto',
   cardShowDuration: DEFAULT_CARD_SHOW_DURATION,
+  memoFileDir: '',
+  bingWallpaperDir: '',
 }
 
 const defaultSiteConfig: SiteConfig = {

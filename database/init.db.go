@@ -77,7 +77,9 @@ func InitDB() {
 		defaultLogo TEXT,
 		defaultSearchEngine INTEGER,
 		colorTheme TEXT DEFAULT 'auto',
-		cardShowDuration INTEGER DEFAULT 5
+		cardShowDuration INTEGER DEFAULT 5,
+		memoFileDir TEXT,
+		bingWallpaperDir TEXT
 	);
 	`
 	_, err = DB.Exec(sql_create_table)
@@ -130,6 +132,14 @@ func InitDB() {
 	}
 	if !columnExists("nav_setting", "cardShowDuration") {
 		DB.Exec(`ALTER TABLE nav_setting ADD COLUMN cardShowDuration INTEGER DEFAULT 5;`)
+	}
+	// 设置表表结构升级-20261127【便签附件与必应每日壁纸的存储目录】
+	// 留空表示使用默认目录（./data/memo-files 与 ./data），支持相对/绝对路径
+	if !columnExists("nav_setting", "memoFileDir") {
+		DB.Exec(`ALTER TABLE nav_setting ADD COLUMN memoFileDir TEXT;`)
+	}
+	if !columnExists("nav_setting", "bingWallpaperDir") {
+		DB.Exec(`ALTER TABLE nav_setting ADD COLUMN bingWallpaperDir TEXT;`)
 	}
 
 	// 默认 tools 用的 表

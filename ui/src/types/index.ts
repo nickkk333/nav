@@ -61,6 +61,10 @@ export interface Setting {
   colorTheme: string
   /** 鼠标活动后卡片与分类名的持续显示时间（秒） */
   cardShowDuration: number
+  /** 便签附件存储目录：留空使用默认 ./data/memo-files，可填相对或绝对路径 */
+  memoFileDir: string
+  /** 必应每日壁纸存储目录：留空使用默认 ./data，可填相对或绝对路径 */
+  bingWallpaperDir: string
 }
 
 export interface SiteConfig {

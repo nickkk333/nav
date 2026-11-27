@@ -2,6 +2,10 @@ package service
 
 import (
 	"database/sql"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/nickkk333/nav/database"
 	"github.com/nickkk333/nav/logger"
@@ -14,18 +18,47 @@ const (
 	DefaultCardShowDuration = 5
 	MinCardShowDuration     = 1
 	MaxCardShowDuration     = 600
+	// DefaultMemoFileDir 便签附件的默认存储目录（docker 部署挂载 ./data 即可持久化）
+	DefaultMemoFileDir = "./data/memo-files"
+	// DefaultBingWallpaperDir 必应每日壁纸的默认存储目录
+	DefaultBingWallpaperDir = "./data"
 )
+
+// defaultSetting 返回读取不到数据库时的默认设置
+func defaultSetting() types.Setting {
+	return types.Setting{
+		Id:               1,
+		Favicon:          "favicon.ico",
+		Title:            "Nav",
+		GovRecord:        "",
+		Logo192:          "logo192.png",
+		Logo512:          "logo512.png",
+		HideAdmin:        false,
+		HideGithub:       false,
+		HideMemo:         false,
+		HideCatelogNav:   false,
+		JumpTargetBlank:  true,
+		BackgroundImage:  "",
+		DefaultLogo:      "",
+		ColorTheme:       DefaultColorTheme,
+		CardShowDuration: DefaultCardShowDuration,
+	}
+}
 
 // GetSetting 获取网站设置
 func GetSetting() types.Setting {
+	setting := defaultSetting()
+	// 单元测试等尚未初始化数据库的场景直接返回默认值，避免空指针
+	if database.DB == nil {
+		return setting
+	}
 	row := database.DB.QueryRow(`
-		SELECT id, favicon, title, govRecord, logo192, logo512, hideAdmin, hideGithub, hideMemo, hideCatelogNav, jumpTargetBlank, backgroundImage, defaultLogo, defaultSearchEngine, colorTheme, cardShowDuration
+		SELECT id, favicon, title, govRecord, logo192, logo512, hideAdmin, hideGithub, hideMemo, hideCatelogNav, jumpTargetBlank, backgroundImage, defaultLogo, defaultSearchEngine, colorTheme, cardShowDuration, memoFileDir, bingWallpaperDir
 		FROM nav_setting
 		ORDER BY id ASC
 		LIMIT 1;
 		`)
 	var (
-		setting             types.Setting
 		hideAdmin           sql.NullBool
 		hideGithub          sql.NullBool
 		hideMemo            sql.NullBool
@@ -36,30 +69,15 @@ func GetSetting() types.Setting {
 		defaultSearchEngine sql.NullInt64
 		colorTheme          sql.NullString
 		cardShowDuration    sql.NullInt64
+		memoFileDir         sql.NullString
+		bingWallpaperDir    sql.NullString
 	)
 	err := row.Scan(&setting.Id, &setting.Favicon, &setting.Title, &setting.GovRecord, &setting.Logo192, &setting.Logo512,
 		&hideAdmin, &hideGithub, &hideMemo, &hideCatelogNav, &jumpTargetBlank, &backgroundImage, &defaultLogo, &defaultSearchEngine,
-		&colorTheme, &cardShowDuration)
+		&colorTheme, &cardShowDuration, &memoFileDir, &bingWallpaperDir)
 	if err != nil {
 		logger.LogError("获取配置失败: %s", err)
-		return types.Setting{
-			Id:                  1,
-			Favicon:             "favicon.ico",
-			Title:               "Nav",
-			GovRecord:           "",
-			Logo192:             "logo192.png",
-			Logo512:             "logo512.png",
-			HideAdmin:           false,
-			HideGithub:          false,
-			HideMemo:            false,
-			HideCatelogNav:      false,
-			JumpTargetBlank:     true,
-			BackgroundImage:     "",
-			DefaultLogo:         "",
-			DefaultSearchEngine: 0,
-			ColorTheme:          DefaultColorTheme,
-			CardShowDuration:    DefaultCardShowDuration,
-		}
+		return setting
 	}
 	setting.HideAdmin = hideAdmin.Bool
 	setting.HideGithub = hideGithub.Bool
@@ -91,17 +109,73 @@ func GetSetting() types.Setting {
 	if cardShowDuration.Valid && cardShowDuration.Int64 >= MinCardShowDuration && cardShowDuration.Int64 <= MaxCardShowDuration {
 		setting.CardShowDuration = int(cardShowDuration.Int64)
 	}
+	// 未设置时使用默认存储目录
+	setting.MemoFileDir = memoFileDir.String
+	setting.BingWallpaperDir = bingWallpaperDir.String
 	return setting
 }
 
 // UpdateSetting 更新网站设置
 func UpdateSetting(data types.Setting) error {
-	_, err := database.DB.Exec(`
+	// 存储目录先做校验与规范化：空字符串表示使用默认目录，非空时自动创建
+	memoFileDir, err := normalizeStorageDir(data.MemoFileDir)
+	if err != nil {
+		return fmt.Errorf("便签附件存储目录不可用：%w", err)
+	}
+	data.MemoFileDir = memoFileDir
+	bingWallpaperDir, err := normalizeStorageDir(data.BingWallpaperDir)
+	if err != nil {
+		return fmt.Errorf("必应壁纸存储目录不可用：%w", err)
+	}
+	data.BingWallpaperDir = bingWallpaperDir
+	_, err = database.DB.Exec(`
 		UPDATE nav_setting
-		SET favicon = ?, title = ?, govRecord = ?, logo192 = ?, logo512 = ?, hideAdmin = ?, hideGithub = ?, hideMemo = ?, hideCatelogNav = ?, jumpTargetBlank = ?, backgroundImage = ?, defaultLogo = ?, defaultSearchEngine = ?, colorTheme = ?, cardShowDuration = ?
+		SET favicon = ?, title = ?, govRecord = ?, logo192 = ?, logo512 = ?, hideAdmin = ?, hideGithub = ?, hideMemo = ?, hideCatelogNav = ?, jumpTargetBlank = ?, backgroundImage = ?, defaultLogo = ?, defaultSearchEngine = ?, colorTheme = ?, cardShowDuration = ?, memoFileDir = ?, bingWallpaperDir = ?
 		WHERE id = (SELECT id FROM nav_setting ORDER BY id ASC LIMIT 1);
 		`, data.Favicon, data.Title, data.GovRecord, data.Logo192, data.Logo512,
 		data.HideAdmin, data.HideGithub, data.HideMemo, data.HideCatelogNav, data.JumpTargetBlank, data.BackgroundImage, data.DefaultLogo,
-		data.DefaultSearchEngine, data.ColorTheme, data.CardShowDuration)
+		data.DefaultSearchEngine, data.ColorTheme, data.CardShowDuration, data.MemoFileDir, data.BingWallpaperDir)
 	return err
+}
+
+// normalizeStorageDir 校验并规范化存储目录：
+// 空字符串表示使用默认目录；非空时必须是目录（不存在则创建）
+func normalizeStorageDir(dir string) (string, error) {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return "", nil
+	}
+	dir = filepath.Clean(dir)
+	if info, err := os.Stat(dir); err == nil && !info.IsDir() {
+		return "", fmt.Errorf("%s 已存在且不是目录", dir)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("创建目录失败：%w", err)
+	}
+	return dir, nil
+}
+
+// resolveStorageDir 把配置值解析成实际目录，留空时回落到默认目录
+func resolveStorageDir(configured, fallback string) string {
+	dir := strings.TrimSpace(configured)
+	if dir == "" {
+		return fallback
+	}
+	return filepath.Clean(dir)
+}
+
+// MemoFileDir 返回当前生效的便签附件存储目录
+func MemoFileDir() string {
+	if database.DB == nil {
+		return DefaultMemoFileDir
+	}
+	return resolveStorageDir(GetSetting().MemoFileDir, DefaultMemoFileDir)
+}
+
+// BingWallpaperDir 返回当前生效的必应每日壁纸存储目录
+func BingWallpaperDir() string {
+	if database.DB == nil {
+		return DefaultBingWallpaperDir
+	}
+	return resolveStorageDir(GetSetting().BingWallpaperDir, DefaultBingWallpaperDir)
 }

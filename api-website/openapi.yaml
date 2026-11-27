@@ -150,6 +150,16 @@ components:
           description: >-
             首页背景图地址，可为后台上传接口返回的 url 或外链地址。
             留空时前台会使用服务端保存的必应每日壁纸（/api/bingWallpaper）
+        memoFileDir:
+          type: string
+          description: >-
+            便签附件（图片/文档）存储目录。留空使用默认 ./data/memo-files，
+            可填相对进程工作目录的路径或绝对路径
+        bingWallpaperDir:
+          type: string
+          description: >-
+            必应每日壁纸存储目录。留空使用默认 ./data，
+            可填相对进程工作目录的路径或绝对路径
 
     SiteConfig:
       description: 站点展示配置

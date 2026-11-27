@@ -16,8 +16,6 @@ import (
 )
 
 const (
-	// BingWallpaperDir 必应每日壁纸的存放目录（与 nav.db 同级，docker 部署挂载 ./data 即可持久化）
-	BingWallpaperDir = "./data"
 	// BingWallpaperBaseName 必应每日壁纸的文件名（不含扩展名，扩展名按下载到的图片格式决定）
 	BingWallpaperBaseName = "必应壁纸"
 	// BingWallpaperDailyBaseName 每日壁纸副本的文件名（不含扩展名）：
@@ -66,7 +64,7 @@ func bingWallpaperFileName(title string) string {
 	return name
 }
 
-// DownloadBingWallpaper 下载必应每日壁纸到 data 目录
+// DownloadBingWallpaper 下载必应每日壁纸到壁纸存储目录
 // 保存为「必应壁纸-YYYYMMDD-图片描述 + 图片格式后缀」，历史壁纸保留不删；
 // 当天已经下载过、或距离上次失败尝试过近时直接跳过；下载失败只记录日志，不影响服务启动
 func DownloadBingWallpaper() {
@@ -84,6 +82,7 @@ func DownloadBingWallpaper() {
 		return
 	}
 	lastBingWallpaperTry = time.Now()
+	dir := BingWallpaperDir()
 
 	info, err := fetchBingWallpaperInfo()
 	if err != nil {
@@ -97,20 +96,23 @@ func DownloadBingWallpaper() {
 			logger.LogError("下载必应每日壁纸失败(%s): %s", url, err)
 			continue
 		}
-		utils.PathExistsOrCreate(BingWallpaperDir)
+		utils.PathExistsOrCreate(dir)
 		name := bingWallpaperFileName(info.Title) + ext
-		if err := os.WriteFile(filepath.Join(BingWallpaperDir, name), data, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, name), data, 0o644); err != nil {
 			logger.LogError("保存必应每日壁纸失败: %s", err)
 			return
 		}
 		// 壁纸按日期命名（必应壁纸-YYYYMMDD-描述），历史壁纸一律保留、不做清理
-		logger.LogInfo("必应每日壁纸已保存到本地: %s %s", filepath.Join(BingWallpaperDir, name), info.Title)
+		logger.LogInfo("必应每日壁纸已保存到本地: %s %s", filepath.Join(dir, name), info.Title)
 		// 同时覆盖一份固定文件名的「每日壁纸.扩展名」，方便其它程序按固定路径读取当天壁纸
 		if dailyPath, err := saveBingWallpaperDailyCopy(data, ext); err != nil {
 			logger.LogError("保存每日壁纸副本失败: %s", err)
 		} else {
 			logger.LogInfo("每日壁纸副本已更新: %s", dailyPath)
 		}
+		// 下载成功后清空重试计时：这样切换壁纸目录后，下一次请求可以立即在新目录下载，
+		// 而不是被失败重试的 10 分钟间隔挡住
+		lastBingWallpaperTry = time.Time{}
 		return
 	}
 }
@@ -118,8 +120,9 @@ func DownloadBingWallpaper() {
 // saveBingWallpaperDailyCopy 把当天壁纸复制为固定文件「每日壁纸.扩展名」，覆盖旧文件。
 // 下载到的图片格式变化时（例如 jpg 变成 png），顺带删除其它扩展名的旧副本，保证只保留一个。
 func saveBingWallpaperDailyCopy(data []byte, ext string) (string, error) {
-	utils.PathExistsOrCreate(BingWallpaperDir)
-	path := filepath.Join(BingWallpaperDir, BingWallpaperDailyBaseName+ext)
+	dir := BingWallpaperDir()
+	utils.PathExistsOrCreate(dir)
+	path := filepath.Join(dir, BingWallpaperDailyBaseName+ext)
 	// 先写临时文件再原子替换，避免其它程序正好读取时拿到只写了一半的图片
 	tmp := path + ".tmp"
 	defer os.Remove(tmp)
@@ -129,8 +132,8 @@ func saveBingWallpaperDailyCopy(data []byte, ext string) (string, error) {
 	if err := os.Rename(tmp, path); err != nil {
 		return "", err
 	}
-	// 只清理「每日壁纸.图片后缀」这类副本，不碰用户放在 data 目录里的其它文件
-	matches, err := filepath.Glob(filepath.Join(BingWallpaperDir, BingWallpaperDailyBaseName+".*"))
+	// 只清理「每日壁纸.图片后缀」这类副本，不碰用户放在壁纸目录里的其它文件
+	matches, err := filepath.Glob(filepath.Join(dir, BingWallpaperDailyBaseName+".*"))
 	if err != nil {
 		return path, nil
 	}
@@ -157,7 +160,7 @@ func ensureBingWallpaperDailyCopy(path string) {
 	if err != nil {
 		return
 	}
-	target := filepath.Join(BingWallpaperDir, BingWallpaperDailyBaseName+ext)
+	target := filepath.Join(BingWallpaperDir(), BingWallpaperDailyBaseName+ext)
 	if targetInfo, err := os.Stat(target); err == nil &&
 		!targetInfo.ModTime().Before(sourceInfo.ModTime()) &&
 		targetInfo.Size() == sourceInfo.Size() {
@@ -255,14 +258,15 @@ func BingWallpaperDownloadedToday() bool {
 	return year == nowYear && month == nowMonth && day == nowDay
 }
 
-// bingWallpaperFiles 列出 data 目录下所有必应壁纸文件
+// bingWallpaperFiles 列出壁纸存储目录下所有必应壁纸文件
 // 两个模式分别匹配旧命名（必应壁纸.jpg）与新命名（必应壁纸-YYYYMMDD-描述.jpg）；
 // 固定副本「每日壁纸.扩展名」不参与匹配，避免被当成最新壁纸影响标题解析；
-// 不用宽泛的「必应壁纸*」，避免误伤用户手工放进 data 目录的同前缀文件
+// 不用宽泛的「必应壁纸*」，避免误伤用户手工放进壁纸目录的同前缀文件
 func bingWallpaperFiles() []string {
+	dir := BingWallpaperDir()
 	patterns := []string{
-		filepath.Join(BingWallpaperDir, BingWallpaperBaseName+".*"),
-		filepath.Join(BingWallpaperDir, BingWallpaperBaseName+"-*"),
+		filepath.Join(dir, BingWallpaperBaseName+".*"),
+		filepath.Join(dir, BingWallpaperBaseName+"-*"),
 	}
 	files := make([]string, 0, 2)
 	for _, pattern := range patterns {
