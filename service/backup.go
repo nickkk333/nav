@@ -133,13 +133,13 @@ func importCatelogs(tx *sql.Tx, catelogs []types.Catelog) error {
 		err := tx.QueryRow(`SELECT id FROM nav_catelog WHERE name = ?;`, name).Scan(&existId)
 		switch {
 		case err == nil:
-			if _, err = tx.Exec(`UPDATE nav_catelog SET sort = ?, "hide" = ?, "default" = ? WHERE id = ?;`,
-				catelog.Sort, catelog.Hide, catelog.Default, existId); err != nil {
+			if _, err = tx.Exec(`UPDATE nav_catelog SET sort = ?, "hide" = ? WHERE id = ?;`,
+				catelog.Sort, catelog.Hide, existId); err != nil {
 				return err
 			}
 		case err == sql.ErrNoRows:
-			if _, err = tx.Exec(`INSERT INTO nav_catelog (name, sort, "hide", "default") VALUES (?, ?, ?, ?);`,
-				name, catelog.Sort, catelog.Hide, catelog.Default); err != nil {
+			if _, err = tx.Exec(`INSERT INTO nav_catelog (name, sort, "hide") VALUES (?, ?, ?);`,
+				name, catelog.Sort, catelog.Hide); err != nil {
 				return err
 			}
 		default:
@@ -152,8 +152,8 @@ func importCatelogs(tx *sql.Tx, catelogs []types.Catelog) error {
 // importTools 导入工具：同 id 覆盖，没出现在备份里的工具保持不动
 func importTools(tx *sql.Tx, tools []types.Tool) error {
 	stmt, err := tx.Prepare(`
-		INSERT INTO nav_table (id, name, url, internal_url, logo, logo_name, catelog, "desc", sort, "hide", "default")
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO nav_table (id, name, url, internal_url, logo, logo_name, catelog, "desc", sort, "hide")
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			url = excluded.url,
@@ -163,8 +163,7 @@ func importTools(tx *sql.Tx, tools []types.Tool) error {
 			catelog = excluded.catelog,
 			"desc" = excluded."desc",
 			sort = excluded.sort,
-			"hide" = excluded."hide",
-			"default" = excluded."default";
+			"hide" = excluded."hide";
 		`)
 	if err != nil {
 		return err
@@ -179,16 +178,16 @@ func importTools(tx *sql.Tx, tools []types.Tool) error {
 		internalUrl := strings.TrimSpace(tool.InternalUrl)
 		if tool.Id > 0 {
 			if _, err = stmt.Exec(tool.Id, name, tool.Url, internalUrl, tool.Logo, tool.LogoName, tool.Catelog, tool.Desc,
-				tool.Sort, tool.Hide, tool.Default); err != nil {
+				tool.Sort, tool.Hide); err != nil {
 				return err
 			}
 			continue
 		}
 		// 手工编辑过的备份可能没有 id，按新增处理，交给自增主键分配
 		if _, err = tx.Exec(`
-			INSERT INTO nav_table (name, url, internal_url, logo, logo_name, catelog, "desc", sort, "hide", "default")
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-			`, name, tool.Url, internalUrl, tool.Logo, tool.LogoName, tool.Catelog, tool.Desc, tool.Sort, tool.Hide, tool.Default); err != nil {
+			INSERT INTO nav_table (name, url, internal_url, logo, logo_name, catelog, "desc", sort, "hide")
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+			`, name, tool.Url, internalUrl, tool.Logo, tool.LogoName, tool.Catelog, tool.Desc, tool.Sort, tool.Hide); err != nil {
 			return err
 		}
 	}
@@ -243,8 +242,8 @@ func ensureToolCatelogs(tx *sql.Tx, tools []types.Tool) error {
 			continue
 		}
 		if _, err := tx.Exec(`
-			INSERT INTO nav_catelog (name, sort, "hide", "default")
-			SELECT ?, (SELECT IFNULL(MAX(sort), 0) + 1 FROM nav_catelog), 0, 0
+			INSERT INTO nav_catelog (name, sort, "hide")
+			SELECT ?, (SELECT IFNULL(MAX(sort), 0) + 1 FROM nav_catelog), 0
 			WHERE NOT EXISTS (SELECT 1 FROM nav_catelog WHERE name = ?);
 			`, name, name); err != nil {
 			return err

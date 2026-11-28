@@ -35,9 +35,6 @@ components:
           description: 排序值，从 1 开始依次递增
         hide:
           type: boolean
-        default:
-          type: boolean
-          description: 是否展示在主页默认栏
 
     AddToolDto:
       type: object
@@ -96,9 +93,6 @@ components:
           type: integer
         hide:
           type: boolean
-        default:
-          type: boolean
-          description: 该分类下的工具是否展示在主页默认栏
 
     UpdateCatelogDto:
       type: object
@@ -114,9 +108,6 @@ components:
         hide:
           type: boolean
           description: 变化时会同步该分类下所有工具的隐藏状态
-        default:
-          type: boolean
-          description: 变化时会同步该分类下所有工具的默认栏展示状态
 
     Setting:
       type: object
@@ -787,9 +778,6 @@ paths:
                     落位后后端会把所有分类的排序值重排成从 1 开始依次递增
                 hide:
                   type: boolean
-                default:
-                  type: boolean
-                  description: 该分类下的工具是否展示在主页默认栏
       responses:
         "200":
           description: 添加分类成功

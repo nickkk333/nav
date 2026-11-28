@@ -126,11 +126,10 @@ interface CatelogForm {
   name: string
   sort: number
   hide: boolean
-  default: boolean
 }
 
-/** 新建分类：排序值默认 -1（排到最后）、默认开关默认打开 */
-const createEmptyForm = (): CatelogForm => ({ name: '', sort: -1, hide: false, default: true })
+/** 新建分类：排序值默认 -1（排到最后） */
+const createEmptyForm = (): CatelogForm => ({ name: '', sort: -1, hide: false })
 
 /** 分类表格可隐藏的列 */
 const catelogColumns: TableColumnOption[] = [
@@ -235,7 +234,6 @@ const pickRow = (row: Catelog): Catelog => ({
   name: row.name,
   sort: row.sort,
   hide: row.hide,
-  default: row.default,
 })
 
 /** 数据（重新）加载后重建快照 */
@@ -256,8 +254,7 @@ const isDirty = (row: Catelog) => {
   return (
     row.name !== snap.name ||
     (row.sort ?? 0) !== (snap.sort ?? 0) ||
-    Boolean(row.hide) !== Boolean(snap.hide) ||
-    Boolean(row.default) !== Boolean(snap.default)
+    Boolean(row.hide) !== Boolean(snap.hide)
   )
 }
 
@@ -289,10 +286,8 @@ const saveRow = async (row: Catelog) => {
   const snapshot = snapshotMap[row.id]
   const oldName = snapshot?.name ?? row.name
   const oldHide = Boolean(snapshot?.hide)
-  const oldDefault = Boolean(snapshot?.default)
   const newName = String(row.name).trim()
   const newHide = Boolean(row.hide)
-  const newDefault = Boolean(row.default)
   savingMap[row.id] = true
   try {
     const res = await fetchUpdateCateLog({ ...pickRow(row), name: newName })
@@ -301,7 +296,7 @@ const saveRow = async (row: Catelog) => {
       return
     }
     row.name = newName
-    // 改名 / 隐藏 / 默认变化会同步影响该分类下的工具，这里同步本地数据，避免整表重新加载
+    // 改名 / 隐藏变化会同步影响该分类下的工具，这里同步本地数据，避免整表重新加载
     if (oldName !== newName) {
       toolsOf(oldName).forEach((tool) => {
         tool.catelog = newName
@@ -310,11 +305,6 @@ const saveRow = async (row: Catelog) => {
     if (oldHide !== newHide) {
       toolsOf(newName).forEach((tool) => {
         tool.hide = newHide
-      })
-    }
-    if (oldDefault !== newDefault) {
-      toolsOf(newName).forEach((tool) => {
-        tool.default = newDefault
       })
     }
     snapshotMap[row.id] = pickRow(row)

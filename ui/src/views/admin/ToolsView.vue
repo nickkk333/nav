@@ -331,7 +331,6 @@ interface ToolForm {
   desc: string
   sort: number
   hide: boolean
-  default: boolean
 }
 
 const createEmptyForm = (): ToolForm => ({
@@ -345,8 +344,6 @@ const createEmptyForm = (): ToolForm => ({
   // -1 表示新增后自动排到最后；0 或留空表示排到最前；正数表示插入到该序号位置
   sort: -1,
   hide: false,
-  // 新工具默认展示在默认页
-  default: true,
 })
 
 /** 工具管理表格可隐藏的列；多选列与操作列固定保留 */
@@ -537,7 +534,6 @@ const pickRow = (row: Tool): Tool => ({
   desc: row.desc,
   sort: row.sort,
   hide: row.hide,
-  default: row.default,
 })
 
 /** 数据（重新）加载后重建快照 */
@@ -564,8 +560,7 @@ const isDirty = (row: Tool) => {
     row.catelog !== snap.catelog ||
     row.desc !== snap.desc ||
     row.sort !== snap.sort ||
-    Boolean(row.hide) !== Boolean(snap.hide) ||
-    Boolean(row.default) !== Boolean(snap.default)
+    Boolean(row.hide) !== Boolean(snap.hide)
   )
 }
 

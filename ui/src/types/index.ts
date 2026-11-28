@@ -16,7 +16,6 @@ export interface Tool {
   desc: string
   sort: number
   hide: boolean
-  default: boolean
 }
 
 export interface Catelog {
@@ -24,8 +23,6 @@ export interface Catelog {
   name: string
   sort: number
   hide: boolean
-  /** 该分类下的工具是否展示在主页默认栏 */
-  default: boolean
 }
 
 // 抓取网址得到的信息（后台添加工具时自动填充用）

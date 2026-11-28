@@ -23,8 +23,6 @@ type UpdateCatelogDto struct {
 	Name string `json:"name"`
 	Sort int    `json:"sort"`
 	Hide bool   `json:"hide"`
-	// Default 该分类下的工具是否展示在主页默认栏，变化时会同步该分类下所有工具
-	Default bool `json:"default"`
 }
 
 type AddCatelogDto struct {
@@ -33,8 +31,6 @@ type AddCatelogDto struct {
 	// 落位后由后端把所有分类的排序值统一重排成从 1 开始依次递增
 	Sort int  `json:"sort"`
 	Hide bool `json:"hide"`
-	// Default 该分类下的工具是否展示在主页默认栏
-	Default bool `json:"default"`
 }
 type UpdateToolDto struct {
 	Id   int    `json:"id"`
@@ -50,7 +46,6 @@ type UpdateToolDto struct {
 	Desc     string `json:"desc"`
 	Sort     int    `json:"sort"`
 	Hide     bool   `json:"hide"`
-	Default  bool   `json:"default"`
 }
 type AddToolDto struct {
 	Name string `json:"name"`
@@ -65,9 +60,8 @@ type AddToolDto struct {
 	Desc     string `json:"desc"`
 	// Sort 新建工具的落点：-1（默认）或负数排到最后；0 或留空排到最前；正数插入到该序号位置
 	// 落位后由后端把所有工具的排序值统一重排成从 1 开始依次递增
-	Sort    int  `json:"sort"`
-	Hide    bool `json:"hide"`
-	Default bool `json:"default"`
+	Sort int  `json:"sort"`
+	Hide bool `json:"hide"`
 }
 
 // SaveSearchEngineLogoDto 把搜索引擎 logo 下载保存到本地

@@ -84,7 +84,6 @@ export const generateSearchEngineCards = async (searchString: string): Promise<T
         catelog: '默认',
         sort: engine.sort,
         hide: false,
-        default: false,
       }))
   } catch (error) {
     console.error('生成搜索引擎卡片失败:', error)

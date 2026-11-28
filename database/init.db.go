@@ -143,6 +143,7 @@ func InitDB() {
 	// 该列不再读写，保留在旧数据库中不影响使用
 
 	// 默认 tools 用的 表
+	// 注：'default' 列已废弃（主页「默认」分类展示全部卡片），保留列结构以兼容旧库与历史迁移
 	sql_create_table = `
 		CREATE TABLE IF NOT EXISTS nav_table (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -209,6 +210,7 @@ func InitDB() {
 	}
 
 	// 分类表表结构升级-20250929-【分类默认栏开关】
+	// 注：该项已废弃（主页「默认」分类展示全部卡片），列仅保留以兼容旧库与历史迁移，不再读写
 	if !columnExists("nav_catelog", "default") {
 		DB.Exec(`ALTER TABLE nav_catelog ADD COLUMN "default" BOOLEAN;`)
 		// 用该分类下工具的默认状态初始化：没有工具或工具全部开启视为开启

@@ -68,7 +68,6 @@ type Tool struct {
 	Desc     string `json:"desc"`
 	Sort     int    `json:"sort"`
 	Hide     bool   `json:"hide"`
-	Default  bool   `json:"default"`
 }
 
 type Catelog struct {
@@ -76,8 +75,6 @@ type Catelog struct {
 	Name string `json:"name"`
 	Sort int    `json:"sort"`
 	Hide bool   `json:"hide"`
-	// Default 该分类下的工具是否展示在主页默认栏
-	Default bool `json:"default"`
 }
 
 // 搜索引擎模型

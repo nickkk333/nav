@@ -345,10 +345,11 @@ const localToolResults = computed<Tool[]>(() => {
   const tools = site.data.tools ?? []
   const searching = isSearching.value
   return tools.filter((item) => {
-    // 搜索时在所有工具中查找；未搜索时按当前分类过滤（分类导航隐藏或选中「默认」时只展示默认栏）
+    // 搜索时在所有工具中查找；未搜索时按当前分类过滤：
+    // 「默认」分类（或分类导航隐藏）展示全部卡片，其他分类只展示该分类下的卡片
     if (!searching) {
       if (!showCatelogNav.value || currTag.value === DEFAULT_TAG) {
-        return item.default === true
+        return true
       }
       return item.catelog === currTag.value
     }

@@ -13,12 +13,11 @@ import (
 // （老实现用 CheckTxErr 只回滚不中断，后续语句都在已回滚的事务上执行，提交也必然失败）
 func UpdateCatelog(data types.UpdateCatelogDto) error {
 
-	// 查询分类原名称、原有的隐藏状态与默认栏开关
-	sql_select_old_catelog_name := `select name, hide, "default" from nav_catelog where id = ?;`
+	// 查询分类原名称与原有的隐藏状态
+	sql_select_old_catelog_name := `select name, hide from nav_catelog where id = ?;`
 	var oldName string
 	var oldHide sql.NullBool
-	var oldDefault sql.NullBool
-	if err := database.DB.QueryRow(sql_select_old_catelog_name, data.Id).Scan(&oldName, &oldHide, &oldDefault); err != nil {
+	if err := database.DB.QueryRow(sql_select_old_catelog_name, data.Id).Scan(&oldName, &oldHide); err != nil {
 		return utils.CheckErr(err)
 	}
 
@@ -33,9 +32,9 @@ func UpdateCatelog(data types.UpdateCatelogDto) error {
 	// 更新分类新名称
 	if _, err = tx.Exec(`
 		UPDATE nav_catelog
-		SET name = ?, sort = ?, hide = ?, "default" = ?
+		SET name = ?, sort = ?, hide = ?
 		WHERE id = ?;
-		`, data.Name, data.Sort, data.Hide, data.Default, data.Id); err != nil {
+		`, data.Name, data.Sort, data.Hide, data.Id); err != nil {
 		return utils.CheckErr(err)
 	}
 
@@ -58,17 +57,6 @@ func UpdateCatelog(data types.UpdateCatelogDto) error {
 			SET "hide" = ?
 			WHERE catelog = ?;
 			`, data.Hide, data.Name); err != nil {
-			return utils.CheckErr(err)
-		}
-	}
-
-	// 默认栏开关变化时，同步该分类下所有工具的默认状态
-	if oldDefault.Bool != data.Default {
-		if _, err = tx.Exec(`
-			UPDATE nav_table
-			SET "default" = ?
-			WHERE catelog = ?;
-			`, data.Default, data.Name); err != nil {
 			return utils.CheckErr(err)
 		}
 	}
@@ -127,9 +115,9 @@ func AddCatelog(data types.AddCatelogDto) {
 	rows.Close()
 
 	res, err := tx.Exec(`
-		INSERT INTO nav_catelog (name, sort, hide, "default")
-		VALUES (?, ?, ?, ?);
-		`, data.Name, data.Sort, data.Hide, data.Default)
+		INSERT INTO nav_catelog (name, sort, hide)
+		VALUES (?, ?, ?);
+		`, data.Name, data.Sort, data.Hide)
 	if err != nil {
 		utils.CheckErr(err)
 		return
@@ -260,7 +248,7 @@ func UpdateCatelogsSort(updates []types.UpdateCatelogsSortDto) error {
 
 func GetAllCatelog() []types.Catelog {
 	sql_get_all := `
-		SELECT id,name,sort,hide,"default" FROM nav_catelog order by sort, id;
+		SELECT id,name,sort,hide FROM nav_catelog order by sort, id;
 	`
 	results := make([]types.Catelog, 0)
 	rows, err := database.DB.Query(sql_get_all)
@@ -273,15 +261,13 @@ func GetAllCatelog() []types.Catelog {
 	for rows.Next() {
 		var catelog types.Catelog
 		var (
-			sortVal    sql.NullInt64
-			hide       sql.NullBool
-			defaultVal sql.NullBool
+			sortVal sql.NullInt64
+			hide    sql.NullBool
 		)
-		err = rows.Scan(&catelog.Id, &catelog.Name, &sortVal, &hide, &defaultVal)
+		err = rows.Scan(&catelog.Id, &catelog.Name, &sortVal, &hide)
 		utils.CheckErr(err)
 		catelog.Sort = int(sortVal.Int64)
 		catelog.Hide = hide.Bool
-		catelog.Default = defaultVal.Bool
 		results = append(results, catelog)
 	}
 	return results
