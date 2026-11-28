@@ -1,0 +1,44 @@
+#!/bin/bash
+# Nav 原生安装的启动包装脚本（由 cmd/service-setup 通过 SERVICE_COMMAND 调用）：
+#   1. 确认内部数据目录（数据库等）可写，不可写时给出明确错误
+#   2. 检查用户文件目录（便签附件 / 壁纸），不可写只记录警告，等用户授权后自动生效
+#   3. 以应用用户身份启动主程序，端口由飞牛分配（TRIM_SERVICE_PORT）
+
+set -u
+
+APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+DATA_DIR="${NAV_DATA_DIR:-${TRIM_PKGVAR:-$APP_DIR}/data}"
+FILES_DIR="${NAV_FILES_DIR:-$DATA_DIR}"
+PORT="${TRIM_SERVICE_PORT:-6412}"
+
+write_error() {
+    if [ -n "${TRIM_TEMP_LOGFILE:-}" ]; then
+        printf '%s\n' "$1" > "${TRIM_TEMP_LOGFILE}"
+    fi
+    printf '%s\n' "$1" >&2
+}
+
+dir_writable() {
+    local dir="$1"
+    [ -n "$dir" ] || return 1
+    mkdir -p "$dir" 2>/dev/null || return 1
+    local probe="${dir}/.nav-write-test.$$"
+    ( : > "$probe" ) 2>/dev/null || return 1
+    rm -f "$probe" 2>/dev/null || true
+    return 0
+}
+
+if ! dir_writable "$DATA_DIR"; then
+    write_error "无法写入应用数据目录：${DATA_DIR}
+请检查飞牛应用数据目录的权限，或重新安装应用。"
+    exit 1
+fi
+
+if ! dir_writable "$FILES_DIR"; then
+    printf '警告：文件存储目录不可写：%s\n请在 应用中心 → Nav → 应用设置 → 授权目录 中给本应用添加该目录的读写权限；授权后便签附件与壁纸会自动写入该目录。\n' "$FILES_DIR" >&2
+fi
+
+# 工作目录放在应用数据目录，避免程序在只读的安装目录里写临时文件
+cd "${TRIM_PKGVAR:-$APP_DIR}" 2>/dev/null || cd "$APP_DIR" || exit 1
+
+exec "$APP_DIR/nav" -port "$PORT"

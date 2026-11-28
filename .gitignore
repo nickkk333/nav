@@ -128,3 +128,6 @@ requirements.txt
 
 .DS_Store
 /.idea
+
+# 飞牛OS 包内的启动包装脚本属于源码，需要提交（上面的 bin/ 规则会误伤）
+!packaging/fnos-app/bin/
