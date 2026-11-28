@@ -21,8 +21,8 @@ import (
 const gstaticFaviconSize = 128
 
 // imgCacheDir 外链图标缓存目录（图片出库：内容存文件不存数据库，避免 base64 撑大 nav.db）
-// 与 data/images 同级，docker 部署挂载 ./data 即可持久化
-const imgCacheDir = "./data/imgcache"
+// 与 images 同级，位于数据目录下（NAV_DATA_DIR，默认 ./data）
+var imgCacheDir = filepath.Join(utils.DataDir(), "imgcache")
 
 // normalizeSiteUrl 补全站点地址：没有协议（例如 example.com）时补上 http://
 // goscraper 抓取与 gstatic 接口都需要带协议、带域名的地址

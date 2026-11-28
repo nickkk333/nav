@@ -1,71 +1,142 @@
 #!/bin/bash
-# Docker 模式的生命周期钩子：准备数据目录、纠正 compose 里的数据目录默认值、同步端口
+# Nav 原生（非 Docker）安装的生命周期配置：
+#   - 内部数据目录（数据库 / 图片 / 图标缓存 / 自动备份）= 应用私有数据目录（TRIM_PKGVAR）
+#   - 用户文件目录（便签附件 / 必应壁纸）来自安装向导：留空使用飞牛共享目录 Nav，
+#     填写宿主机路径时由用户在「应用设置 → 授权目录」授权后即可写入
+#
+# 注意：本文件会被 shared/cmd/common 之后的 main / installer 通过 `.` 加载，
+# 因此可以直接使用 install_log 等公共函数。
 
-COMPOSE_FILE="${TRIM_APPDEST}/docker/docker-compose.yaml"
-PORT_SAVE="${TRIM_PKGVAR}/.port"
-DATA_DIR_SAVE="${TRIM_PKGVAR}/.datadir"
-# 与 compose 里的插值默认值保持一致（见 docker/docker-compose.yaml）
-FALLBACK_DATA_DIR="/var/apps/nav/var/data"
+LOG_FILE="${TRIM_PKGVAR}/${TRIM_APPNAME}.log"
+PID_FILE="${TRIM_PKGVAR}/${TRIM_APPNAME}.pid"
 
-# 取第一个数据共享目录，形如 /vol1/@appshare/Nav（多个路径时用 : 分隔）
-resolve_data_dir() {
-    local dir="${TRIM_DATA_SHARE_PATHS%%:*}"
-    if [ -z "$dir" ]; then
-        dir="$FALLBACK_DATA_DIR"
-    fi
-    echo "$dir"
+APP_DIR="${TRIM_APPDEST}"
+CONF_FILE="${TRIM_PKGVAR}/nav.env"
+DATA_SHARE="${TRIM_DATA_SHARE_PATHS%%:*}"
+
+# 读取安装时写入的配置（升级、重启都保留在 var 目录里）
+if [ -r "$CONF_FILE" ]; then
+    . "$CONF_FILE"
+fi
+
+# 内部数据目录：应用私有目录，系统已保证应用用户可写
+DATA_DIR="${TRIM_PKGVAR}"
+
+# 用户文件目录优先级：安装向导配置 > 飞牛共享目录 > 内部数据目录
+FILES_DIR="${NAV_FILES_DIR:-}"
+if [ -z "$FILES_DIR" ]; then
+    FILES_DIR="$DATA_SHARE"
+fi
+if [ -z "$FILES_DIR" ]; then
+    FILES_DIR="$DATA_DIR"
+fi
+FILES_DIR="${FILES_DIR%/}"
+
+export NAV_DATA_DIR="$DATA_DIR"
+export NAV_FILES_DIR="$FILES_DIR"
+
+SERVICE_COMMAND="${APP_DIR}/bin/nav-server"
+SVC_CWD="${TRIM_PKGVAR}"
+SVC_BACKGROUND=y
+SVC_WRITE_PID=y
+
+# 目录是否可写（以当前应用用户身份探测，避免只看权限位判断失误）
+dir_writable() {
+    local dir="$1"
+    [ -n "$dir" ] || return 1
+    mkdir -p "$dir" 2>/dev/null || return 1
+    local probe="${dir}/.nav-write-test.$$"
+    ( : > "$probe" ) 2>/dev/null || return 1
+    rm -f "$probe" 2>/dev/null || true
+    return 0
 }
 
-# 把 compose 里插值的默认值改成真实共享目录，安装/升级后重新解包也不会失效
-apply_data_dir() {
-    local dir
-    dir="$(resolve_data_dir)"
-    mkdir -p "$dir" 2>/dev/null || true
-    echo "$dir" > "$DATA_DIR_SAVE"
-    if [ -f "$COMPOSE_FILE" ] && [ "$dir" != "$FALLBACK_DATA_DIR" ]; then
-        sed -i "s|${FALLBACK_DATA_DIR}|${dir}|g" "$COMPOSE_FILE"
+# 把安装向导里填写的目录写入配置；留空表示继续使用共享目录
+save_files_dir() {
+    local dir="$1"
+    [ -n "$dir" ] || return 0
+    # 去掉换行、首尾空白与末尾斜杠，拒绝根目录和带引号的路径（会被 source 解析坏）
+    dir="$(printf '%s' "$dir" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    if [ -z "$dir" ] || [ "$dir" = "/" ] || printf '%s' "$dir" | grep -qE '["'"'"'`$]'; then
+        install_log "忽略无效的文件存储目录：$1"
+        return 0
     fi
-    install_log "Data dir: ${dir} -> /app/data"
+    while [ "${dir%/}" != "$dir" ]; do
+        dir="${dir%/}"
+    done
+    printf 'NAV_FILES_DIR="%s"\n' "$dir" > "$CONF_FILE"
+    chmod 600 "$CONF_FILE" 2>/dev/null || true
+    install_log "文件存储目录：${dir}"
 }
 
-apply_port() {
-    local port="$1"
-    [ -z "$port" ] && return
-    sed -i 's/"[^"]*:6412"/"'"${port}"':6412"/' "$COMPOSE_FILE"
-    echo "${port}" > "$PORT_SAVE"
-    install_log "Patched docker-compose.yaml: port=${port}"
-}
-
-# 已存在的容器不会因为 compose 文件更新而自动改变重启策略。
-# 升级安装后显式纠正为 always，避免旧容器仍是 unless-stopped：
-# 飞牛关机会主动 stop 容器，unless-stopped 视为手动停止，开机不再拉起，
-# 表现为每次重启都需要在应用中心手动启用一次。
-apply_restart_policy() {
-    local name
-    [ -f "$COMPOSE_FILE" ] || return
-    name="$(sed -n 's/^[[:space:]]*container_name:[[:space:]]*//p' "$COMPOSE_FILE" | head -n 1 | xargs)"
-    [ -z "$name" ] && return
-    if docker update --restart=always "$name" >/dev/null 2>&1; then
-        install_log "Restart policy: ${name} -> always"
+# 旧版 Docker 安装的 /app/data 就是共享目录根：把数据库与图片导入应用私有目录，
+# 这样从 Docker 版切换到原生版时数据不丢（共享目录里的壁纸/附件仍按原路径使用）
+import_legacy_data() {
+    local legacy="$DATA_SHARE"
+    [ -n "$legacy" ] || return 0
+    [ -f "${legacy}/nav.db" ] || return 0
+    [ -f "${DATA_DIR}/nav.db" ] && return 0
+    mkdir -p "$DATA_DIR" 2>/dev/null || return 0
+    if ! cp -f "${legacy}/nav.db" "${DATA_DIR}/nav.db" 2>/dev/null; then
+        install_log "检测到旧版数据但无法读取 ${legacy}/nav.db，将使用全新数据库"
+        return 0
     fi
+    install_log "已从旧版 Docker 数据导入数据库：${legacy}/nav.db -> ${DATA_DIR}/nav.db"
+    local suffix
+    for suffix in -wal -shm; do
+        if [ -f "${legacy}/nav.db${suffix}" ]; then
+            cp -f "${legacy}/nav.db${suffix}" "${DATA_DIR}/nav.db${suffix}" 2>/dev/null || true
+        fi
+    done
+    local sub
+    for sub in images imgcache; do
+        if [ -d "${legacy}/${sub}" ] && [ ! -d "${DATA_DIR}/${sub}" ]; then
+            cp -R "${legacy}/${sub}" "${DATA_DIR}/${sub}" 2>/dev/null \
+                || install_log "导入 ${sub} 失败，将在后续使用中重新生成"
+        fi
+    done
 }
 
 service_postinst() {
-    apply_data_dir
-    apply_restart_policy
-}
-
-service_postupgrade() {
-    # 升级会重新解包 app.tgz，compose 里的默认值会回到出厂状态，这里重新纠正
-    apply_data_dir
-    if [ -f "$PORT_SAVE" ]; then
-        apply_port "$(cat "$PORT_SAVE")"
+    # 安装向导填了自定义目录才写入配置；留空时保持共享目录默认值
+    save_files_dir "${wizard_files_dir:-}"
+    # 保存后重新解析，保证下面的检查针对最终生效的目录
+    if [ -r "$CONF_FILE" ]; then
+        . "$CONF_FILE"
     fi
-    apply_restart_policy
+    if [ -n "${NAV_FILES_DIR:-}" ]; then
+        FILES_DIR="${NAV_FILES_DIR%/}"
+    fi
+    export NAV_FILES_DIR="$FILES_DIR"
+    import_legacy_data
+    if dir_writable "$FILES_DIR"; then
+        install_log "文件存储目录可用：${FILES_DIR}"
+    else
+        install_log "警告：文件存储目录 ${FILES_DIR} 当前不可写。请到「应用中心 → Nav → 应用设置 → 授权目录」给本应用添加该目录的读写权限；授权后便签附件与壁纸会自动写入该目录，无需重装"
+    fi
 }
 
 service_postconfig() {
-    if [ -n "${wizard_port:-}" ]; then
-        apply_port "${wizard_port}"
+    # 「授权目录」变更后会回调这里，记录一下最终是否可写，方便排查
+    if dir_writable "$FILES_DIR"; then
+        install_log "文件存储目录已可写：${FILES_DIR}"
+    else
+        install_log "文件存储目录仍不可写：${FILES_DIR}"
     fi
+}
+
+service_postupgrade() {
+    # 从旧版 Docker 安装升级到原生安装时走的是升级流程（不会调用 service_postinst），
+    # 这里同样导入旧数据；全新安装时共享目录里没有 nav.db，函数会直接返回
+    import_legacy_data
+    if dir_writable "$FILES_DIR"; then
+        install_log "文件存储目录可用：${FILES_DIR}"
+    else
+        install_log "警告：文件存储目录 ${FILES_DIR} 当前不可写，请在「应用中心 → Nav → 应用设置 → 授权目录」授权后再启动应用"
+    fi
+}
+
+service_poststop() {
+    # 兜底：按可执行文件绝对路径清理残留进程
+    pkill -f "^${APP_DIR}/nav " 2>/dev/null || true
 }

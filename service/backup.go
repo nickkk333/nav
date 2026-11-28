@@ -23,11 +23,12 @@ import (
 const backupVersion = 5
 
 const (
-	// BackupDir 备份文件的存放目录（与 nav.db 同级，docker 部署挂载 ./data 即可持久化）
-	BackupDir = "./data"
 	// BackupFileName 启动时自动导出的备份文件名（每次启动覆盖，避免 data 目录里堆积旧备份）
 	BackupFileName = "nav-backup.json"
 )
+
+// BackupDir 备份文件的存放目录（与 nav.db 同级，位于数据目录下）
+var BackupDir = utils.DataDir()
 
 // ExportBackupData 导出所有工具、分类、搜索引擎与便签
 // 图标只导出图标网址（不导出图片内容）：工具的 logoName（保存到 data 目录的图片名）与搜索引擎的 logo 都置空，

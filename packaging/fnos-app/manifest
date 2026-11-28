@@ -6,6 +6,7 @@ maintainer      = nickkk333
 maintainer_url  = https://github.com/nickkk333/nav
 distributor     = nickkk333
 distributor_url = https://github.com/nickkk333/nav
+os_min_version  = 1.1.8
 desktop_uidir   = ui
 desktop_applaunchname = nav.Application
 service_port    = 6412

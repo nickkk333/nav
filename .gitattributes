@@ -1,0 +1,11 @@
+# 飞牛OS 的生命周期脚本、启动包装与元数据会被 Linux 直接读取，强制 LF，
+# 避免 Windows 检出成 CRLF 后打包出带 \r 的 manifest / 脚本。
+*.sh text eol=lf
+.gitattributes text eol=lf
+packaging/fnos-app/manifest text eol=lf
+packaging/fnos-app/Nav.sc text eol=lf
+packaging/fnos-app/cmd/* text eol=lf
+packaging/fnos-app/bin/* text eol=lf
+packaging/fnos-app/config/* text eol=lf
+packaging/fnos-app/wizard/* text eol=lf
+packaging/fnos-app/ui/config text eol=lf

@@ -31,9 +31,10 @@ func TableExists(tableName string) bool {
 
 func InitDB() {
 	var err error
-	utils.PathExistsOrCreate("./data")
+	// 数据目录默认 ./data，可用 NAV_DATA_DIR 覆盖（飞牛OS 原生安装指向共享目录）
+	dir := utils.DataDir()
+	utils.PathExistsOrCreate(dir)
 	// 创建数据库
-	dir := "./data"
 	dbPath := filepath.Join(dir, "nav.db")
 	// 添加连接参数（modernc.org/sqlite 的 DSN 短键，均映射为对应 PRAGMA）：
 	//   _journal=WAL               开启 WAL，读写互不阻塞
@@ -134,7 +135,7 @@ func InitDB() {
 		DB.Exec(`ALTER TABLE nav_setting ADD COLUMN cardShowDuration INTEGER DEFAULT 5;`)
 	}
 	// 设置表表结构升级-20261127【便签附件与必应每日壁纸的存储目录】
-	// 留空表示使用默认目录（./data/memo-files 与 ./data），支持相对/绝对路径
+	// 留空表示使用默认目录（NAV_FILES_DIR 下的 memo-files 与根目录，默认 ./data），支持相对/绝对路径
 	if !columnExists("nav_setting", "memoFileDir") {
 		DB.Exec(`ALTER TABLE nav_setting ADD COLUMN memoFileDir TEXT;`)
 	}

@@ -191,12 +191,31 @@ func GetMIME(suffix string) string {
 	return t
 }
 
+// DataDir 返回应用内部数据目录（数据库、图片、图标缓存、自动备份）：
+// 默认 ./data；设置环境变量 NAV_DATA_DIR 可覆盖（飞牛OS 原生安装时指向应用私有数据目录）
+func DataDir() string {
+	if dir := strings.TrimSpace(os.Getenv("NAV_DATA_DIR")); dir != "" {
+		return filepath.Clean(dir)
+	}
+	return "./data"
+}
+
+// FilesDir 返回用户文件的根目录（便签附件、必应壁纸）：
+// 默认跟随 DataDir；设置环境变量 NAV_FILES_DIR 可覆盖
+// （飞牛OS 原生安装时默认指向共享目录，也可在安装向导里指定宿主机路径）
+func FilesDir() string {
+	if dir := strings.TrimSpace(os.Getenv("NAV_FILES_DIR")); dir != "" {
+		return filepath.Clean(dir)
+	}
+	return DataDir()
+}
+
 func PathExistsOrCreate(path string) {
 	_, err := os.Stat(path)
 	if err == nil {
 		return
 	}
-	os.Mkdir(path, os.ModePerm)
+	os.MkdirAll(path, os.ModePerm)
 }
 
 func GenerateId() int {

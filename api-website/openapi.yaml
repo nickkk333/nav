@@ -153,13 +153,15 @@ components:
         memoFileDir:
           type: string
           description: >-
-            便签附件（图片/文档）存储目录。留空使用默认 ./data/memo-files，
-            可填相对进程工作目录的路径或绝对路径
+            便签附件（图片/文档）存储目录。留空使用默认目录
+            （普通部署为 ./data/memo-files，飞牛原生安装为共享目录 Nav/memo-files），
+            可填相对路径或绝对路径
         bingWallpaperDir:
           type: string
           description: >-
-            必应每日壁纸存储目录。留空使用默认 ./data，
-            可填相对进程工作目录的路径或绝对路径
+            必应每日壁纸存储目录。留空使用默认目录
+            （普通部署为 ./data，飞牛原生安装为共享目录 Nav），
+            可填相对路径或绝对路径
 
     SiteConfig:
       description: 站点展示配置

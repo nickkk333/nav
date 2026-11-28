@@ -10,6 +10,7 @@ import (
 	"github.com/nickkk333/nav/database"
 	"github.com/nickkk333/nav/logger"
 	"github.com/nickkk333/nav/types"
+	"github.com/nickkk333/nav/utils"
 )
 
 // 首页显示配置的默认值（与前端 utils/theme.ts 保持一致）
@@ -18,10 +19,15 @@ const (
 	DefaultCardShowDuration = 5
 	MinCardShowDuration     = 1
 	MaxCardShowDuration     = 600
-	// DefaultMemoFileDir 便签附件的默认存储目录（docker 部署挂载 ./data 即可持久化）
-	DefaultMemoFileDir = "./data/memo-files"
+)
+
+// 默认存储目录跟随用户文件目录（NAV_FILES_DIR，默认与数据目录一致）：
+// 便签附件默认 <文件目录>/memo-files，必应壁纸默认 <文件目录>
+var (
+	// DefaultMemoFileDir 便签附件的默认存储目录
+	DefaultMemoFileDir = filepath.Join(utils.FilesDir(), "memo-files")
 	// DefaultBingWallpaperDir 必应每日壁纸的默认存储目录
-	DefaultBingWallpaperDir = "./data"
+	DefaultBingWallpaperDir = utils.FilesDir()
 )
 
 // defaultSetting 返回读取不到数据库时的默认设置

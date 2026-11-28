@@ -16,8 +16,6 @@ import (
 )
 
 const (
-	// UploadDir 上传图片的存放目录（在 data 目录下，docker 部署时挂载 ./data 即可持久化）
-	UploadDir = "./data/images"
 	// UploadUrlPrefix 上传图片的访问前缀，需与 main.go 中的路由保持一致
 	UploadUrlPrefix = "/api/uploadedImage/"
 	// MaxUploadSize 单张图片大小上限：5MB
@@ -27,6 +25,9 @@ const (
 	// uploadExtTips 允许上传的图片格式提示
 	uploadExtTips = "png / jpg / jpeg / webp / gif / svg / ico"
 )
+
+// UploadDir 上传图片的存放目录（数据目录下的 images，Docker 部署时挂载 ./data 即可持久化）
+var UploadDir = filepath.Join(utils.DataDir(), "images")
 
 // allowedUploadExt 允许上传的图片后缀
 var allowedUploadExt = map[string]bool{

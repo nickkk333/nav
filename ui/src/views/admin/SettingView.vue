@@ -60,18 +60,18 @@
         </el-form-item>
         <el-form-item label="便签附件存储目录">
           <el-tooltip
-            content="便签上传的图片/附件保存目录。可填相对进程工作目录的路径或绝对路径；留空使用默认 ./data/memo-files。修改后已有附件不会自动迁移"
+            content="便签上传的图片/附件保存目录。可填相对路径或绝对路径；留空使用默认目录（普通部署为 ./data/memo-files，飞牛原生安装为共享目录 Nav/memo-files）。修改后已有附件不会自动迁移"
             placement="top"
           >
-            <el-input v-model="settingForm.memoFileDir" clearable placeholder="./data/memo-files（留空使用默认）" />
+            <el-input v-model="settingForm.memoFileDir" clearable placeholder="留空使用默认目录" />
           </el-tooltip>
         </el-form-item>
         <el-form-item label="壁纸存储目录">
           <el-tooltip
-            content="必应每日壁纸保存目录。可填相对进程工作目录的路径或绝对路径；留空使用默认 ./data。修改后已有壁纸不会自动迁移，会在新目录重新下载"
+            content="必应每日壁纸保存目录。可填相对路径或绝对路径；留空使用默认目录（普通部署为 ./data，飞牛原生安装为共享目录 Nav）。修改后已有壁纸不会自动迁移，会在新目录重新下载"
             placement="top"
           >
-            <el-input v-model="settingForm.bingWallpaperDir" clearable placeholder="./data（留空使用默认）" />
+            <el-input v-model="settingForm.bingWallpaperDir" clearable placeholder="留空使用默认目录" />
           </el-tooltip>
         </el-form-item>
         <el-form-item label="默认搜索引擎">
