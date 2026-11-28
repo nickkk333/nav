@@ -119,9 +119,9 @@ service_postinst() {
 service_postconfig() {
     # 「授权目录」变更后会回调这里，记录一下最终是否可写，方便排查
     if dir_writable "$FILES_DIR"; then
-        install_log "文件存储目录已可写：${FILES_DIR}"
+        install_log "文件存储目录已可写：${FILES_DIR}（授权目录：${TRIM_DATA_ACCESSIBLE_PATHS:-无}）"
     else
-        install_log "文件存储目录仍不可写：${FILES_DIR}"
+        install_log "文件存储目录仍不可写：${FILES_DIR}（授权目录：${TRIM_DATA_ACCESSIBLE_PATHS:-无}）"
     fi
 }
 
