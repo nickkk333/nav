@@ -60,6 +60,9 @@ COPY --from=backend-builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca
 
 WORKDIR /app
 COPY --from=backend-builder /app/nav /app/nav
+# 开源许可与来源说明（MIT 要求随分发保留版权与许可声明）
+COPY --from=backend-builder /app/LICENSE /app/LICENSE
+COPY --from=backend-builder /app/NOTICE /app/NOTICE
 
 # 数据库文件默认生成在 /app/data/nav.db
 VOLUME ["/app/data"]

@@ -2,6 +2,16 @@
 
 一个轻量的导航站，内置搜索引擎、便签和后台管理，很适合作为浏览器主页使用。有配套的[浏览器插件](https://github.com/nickkk333/nav-extension)。
 
+## 预览
+
+### 首页
+
+<img src="images/home.png" alt="首页" style="width: 100%;"/>
+
+### 管理后台
+
+<img src="images/admin.png" alt="管理后台" style="width: 100%;"/>
+
 ## 功能特性
 
 ### 导航与搜索
@@ -216,16 +226,6 @@ data/
 
 需要程序化访问时，在后台「API Token」页面新建 Token，然后在请求头 `Authorization` 中携带登录 JWT 或该 Token 即可。
 
-## 预览
-
-### 首页
-
-<img src="images/home.png" alt="首页" style="width: 100%;"/>
-
-### 管理后台
-
-<img src="images/admin.png" alt="管理后台" style="width: 100%;"/>
-
 ## 发布产物（GitHub Release）
 
 推送 `v*` tag 后会自动发布，Release 中包含：
@@ -323,6 +323,12 @@ make build-linux      # Linux amd64 静态二进制
 
 如果你有 Go 和 Vue 3 开发经验，可以很轻松上手。修改前端时使用 `make ui-dev` 启动开发服务器即可，接口会自动代理到本地后端。
 
-## License
+## 版权与许可
 
-[MIT](LICENSE)
+本项目 fork 自 [Mereithhh/van-nav](https://github.com/Mereithhh/van-nav)，并在其基础上完成了前后端重构。
+
+- 原始项目版权：Copyright (c) 2021 WangLu（[MIT License](https://github.com/Mereithhh/van-nav/blob/main/LICENSE)）
+- 本项目（重构与后续修改）版权：Copyright (c) 2026 nickkk333
+- 本项目沿用 **MIT License** 发布，完整文本见 [LICENSE](LICENSE)；来源与修改说明见 [NOTICE](NOTICE)。
+
+按 MIT License 的要求，再分发源代码或二进制产物时，请保留 `LICENSE` 中的原始版权声明与许可声明。本项目发布的压缩包、Docker 镜像与飞牛OS 安装包中均已包含 `LICENSE` 与 `NOTICE`。

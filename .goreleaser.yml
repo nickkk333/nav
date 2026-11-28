@@ -41,6 +41,11 @@ archives:
     format_overrides:
       - goos: windows
         formats: [zip]
+    # 二进制分发包中附带开源许可与来源说明（MIT 要求保留版权与许可声明）
+    files:
+      - LICENSE
+      - NOTICE
+      - README.md
 
 checksum:
   name_template: "checksums.txt"
