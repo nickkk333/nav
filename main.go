@@ -83,7 +83,7 @@ func main() {
 	// 异步执行：导出失败只记录日志，不阻塞、不影响服务启动
 	go service.ExportBackupToDataDir()
 
-	// 启动时下载必应每日壁纸到 data 目录，作为前台首页的默认背景图
+	// 启动时下载必应每日壁纸到「便签附件存储目录/每日壁纸」，作为前台首页的默认背景图
 	// 异步执行：离线或下载失败时只记录日志，不阻塞、不影响服务启动
 	go service.DownloadBingWallpaper()
 

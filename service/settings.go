@@ -21,13 +21,17 @@ const (
 	MaxCardShowDuration     = 600
 )
 
+// bingWallpaperSubDir 必应每日壁纸固定使用的子目录：
+// 壁纸不再单独配置存储目录，统一保存在便签附件存储目录下的「每日壁纸」里
+const bingWallpaperSubDir = "每日壁纸"
+
 // 默认存储目录跟随用户文件目录（NAV_FILES_DIR，默认与数据目录一致）：
-// 便签附件默认 <文件目录>/memo-files，必应壁纸默认 <文件目录>
+// 便签附件默认 <文件目录>/memo-files，必应壁纸固定为 <便签附件目录>/每日壁纸
 var (
 	// DefaultMemoFileDir 便签附件的默认存储目录
 	DefaultMemoFileDir = filepath.Join(utils.FilesDir(), "memo-files")
 	// DefaultBingWallpaperDir 必应每日壁纸的默认存储目录
-	DefaultBingWallpaperDir = utils.FilesDir()
+	DefaultBingWallpaperDir = filepath.Join(DefaultMemoFileDir, bingWallpaperSubDir)
 )
 
 // defaultSetting 返回读取不到数据库时的默认设置
@@ -59,7 +63,7 @@ func GetSetting() types.Setting {
 		return setting
 	}
 	row := database.DB.QueryRow(`
-		SELECT id, favicon, title, govRecord, logo192, logo512, hideAdmin, hideGithub, hideMemo, hideCatelogNav, jumpTargetBlank, backgroundImage, defaultLogo, defaultSearchEngine, colorTheme, cardShowDuration, memoFileDir, bingWallpaperDir
+		SELECT id, favicon, title, govRecord, logo192, logo512, hideAdmin, hideGithub, hideMemo, hideCatelogNav, jumpTargetBlank, backgroundImage, defaultLogo, defaultSearchEngine, colorTheme, cardShowDuration, memoFileDir
 		FROM nav_setting
 		ORDER BY id ASC
 		LIMIT 1;
@@ -76,11 +80,10 @@ func GetSetting() types.Setting {
 		colorTheme          sql.NullString
 		cardShowDuration    sql.NullInt64
 		memoFileDir         sql.NullString
-		bingWallpaperDir    sql.NullString
 	)
 	err := row.Scan(&setting.Id, &setting.Favicon, &setting.Title, &setting.GovRecord, &setting.Logo192, &setting.Logo512,
 		&hideAdmin, &hideGithub, &hideMemo, &hideCatelogNav, &jumpTargetBlank, &backgroundImage, &defaultLogo, &defaultSearchEngine,
-		&colorTheme, &cardShowDuration, &memoFileDir, &bingWallpaperDir)
+		&colorTheme, &cardShowDuration, &memoFileDir)
 	if err != nil {
 		logger.LogError("获取配置失败: %s", err)
 		return setting
@@ -117,7 +120,6 @@ func GetSetting() types.Setting {
 	}
 	// 未设置时使用默认存储目录
 	setting.MemoFileDir = memoFileDir.String
-	setting.BingWallpaperDir = bingWallpaperDir.String
 	return setting
 }
 
@@ -129,18 +131,19 @@ func UpdateSetting(data types.Setting) error {
 		return fmt.Errorf("便签附件存储目录不可用：%w", err)
 	}
 	data.MemoFileDir = memoFileDir
-	bingWallpaperDir, err := normalizeStorageDir(data.BingWallpaperDir)
-	if err != nil {
-		return fmt.Errorf("必应壁纸存储目录不可用：%w", err)
+	// 壁纸固定保存在便签附件目录下的「每日壁纸」子目录，配置了便签附件目录时一并创建
+	if memoFileDir != "" {
+		if err := os.MkdirAll(filepath.Join(memoFileDir, bingWallpaperSubDir), 0o755); err != nil {
+			return fmt.Errorf("创建每日壁纸目录失败：%w", err)
+		}
 	}
-	data.BingWallpaperDir = bingWallpaperDir
 	_, err = database.DB.Exec(`
 		UPDATE nav_setting
-		SET favicon = ?, title = ?, govRecord = ?, logo192 = ?, logo512 = ?, hideAdmin = ?, hideGithub = ?, hideMemo = ?, hideCatelogNav = ?, jumpTargetBlank = ?, backgroundImage = ?, defaultLogo = ?, defaultSearchEngine = ?, colorTheme = ?, cardShowDuration = ?, memoFileDir = ?, bingWallpaperDir = ?
+		SET favicon = ?, title = ?, govRecord = ?, logo192 = ?, logo512 = ?, hideAdmin = ?, hideGithub = ?, hideMemo = ?, hideCatelogNav = ?, jumpTargetBlank = ?, backgroundImage = ?, defaultLogo = ?, defaultSearchEngine = ?, colorTheme = ?, cardShowDuration = ?, memoFileDir = ?
 		WHERE id = (SELECT id FROM nav_setting ORDER BY id ASC LIMIT 1);
 		`, data.Favicon, data.Title, data.GovRecord, data.Logo192, data.Logo512,
 		data.HideAdmin, data.HideGithub, data.HideMemo, data.HideCatelogNav, data.JumpTargetBlank, data.BackgroundImage, data.DefaultLogo,
-		data.DefaultSearchEngine, data.ColorTheme, data.CardShowDuration, data.MemoFileDir, data.BingWallpaperDir)
+		data.DefaultSearchEngine, data.ColorTheme, data.CardShowDuration, data.MemoFileDir)
 	return err
 }
 
@@ -178,10 +181,11 @@ func MemoFileDir() string {
 	return resolveStorageDir(GetSetting().MemoFileDir, DefaultMemoFileDir)
 }
 
-// BingWallpaperDir 返回当前生效的必应每日壁纸存储目录
+// BingWallpaperDir 返回当前生效的必应每日壁纸存储目录：
+// 固定在便签附件存储目录下的「每日壁纸」子目录，不再单独配置
 func BingWallpaperDir() string {
 	if database.DB == nil {
 		return DefaultBingWallpaperDir
 	}
-	return resolveStorageDir(GetSetting().BingWallpaperDir, DefaultBingWallpaperDir)
+	return filepath.Join(MemoFileDir(), bingWallpaperSubDir)
 }

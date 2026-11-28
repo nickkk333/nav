@@ -30,12 +30,9 @@ type Setting struct {
 	CardShowDuration int `json:"cardShowDuration"`
 	// MemoFileDir 便签附件的存储目录：留空使用默认 <文件目录>/memo-files
 	// （普通部署为 ./data/memo-files，飞牛原生安装为共享目录 Nav/memo-files）；
-	// 可填相对路径或绝对路径，保存时自动创建目录
+	// 可填相对路径或绝对路径，保存时自动创建目录。
+	// 必应每日壁纸固定保存在该目录下的「每日壁纸」子目录，不再单独配置
 	MemoFileDir string `json:"memoFileDir"`
-	// BingWallpaperDir 必应每日壁纸的存储目录：留空使用默认文件目录
-	// （普通部署为 ./data，飞牛原生安装为共享目录 Nav）；
-	// 可填相对路径或绝对路径，保存时自动创建目录
-	BingWallpaperDir string `json:"bingWallpaperDir"`
 }
 
 type Token struct {

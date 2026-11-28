@@ -79,8 +79,7 @@ func InitDB() {
 		defaultSearchEngine INTEGER,
 		colorTheme TEXT DEFAULT 'auto',
 		cardShowDuration INTEGER DEFAULT 5,
-		memoFileDir TEXT,
-		bingWallpaperDir TEXT
+		memoFileDir TEXT
 	);
 	`
 	_, err = DB.Exec(sql_create_table)
@@ -134,14 +133,14 @@ func InitDB() {
 	if !columnExists("nav_setting", "cardShowDuration") {
 		DB.Exec(`ALTER TABLE nav_setting ADD COLUMN cardShowDuration INTEGER DEFAULT 5;`)
 	}
-	// 设置表表结构升级-20261127【便签附件与必应每日壁纸的存储目录】
-	// 留空表示使用默认目录（NAV_FILES_DIR 下的 memo-files 与根目录，默认 ./data），支持相对/绝对路径
+	// 设置表表结构升级-20261127【便签附件的存储目录】
+	// 留空表示使用默认目录（NAV_FILES_DIR 下的 memo-files，默认 ./data/memo-files），支持相对/绝对路径；
+	// 必应每日壁纸固定保存在该目录下的「每日壁纸」子目录，不再单独配置
 	if !columnExists("nav_setting", "memoFileDir") {
 		DB.Exec(`ALTER TABLE nav_setting ADD COLUMN memoFileDir TEXT;`)
 	}
-	if !columnExists("nav_setting", "bingWallpaperDir") {
-		DB.Exec(`ALTER TABLE nav_setting ADD COLUMN bingWallpaperDir TEXT;`)
-	}
+	// 旧版曾单独配置壁纸目录（bingWallpaperDir 列），现已固定为便签附件目录下的「每日壁纸」：
+	// 该列不再读写，保留在旧数据库中不影响使用
 
 	// 默认 tools 用的 表
 	sql_create_table = `

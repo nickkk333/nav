@@ -24,7 +24,6 @@ const defaultSetting: Setting = {
   colorTheme: 'auto',
   cardShowDuration: DEFAULT_CARD_SHOW_DURATION,
   memoFileDir: '',
-  bingWallpaperDir: '',
 }
 
 const defaultSiteConfig: SiteConfig = {
