@@ -106,6 +106,13 @@ func main() {
 	{
 		// 获取数据的路由
 		api.GET("/", handler.GetAllHandler)
+		// 构建版本号（关于页显示）：由 -ldflags 注入，未注入时为 dev
+		api.GET("/version", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{
+				"success": true,
+				"data":    gin.H{"version": version, "commit": commit},
+			})
+		})
 		// 登录加限流中间件：单 IP 连续失败 10 次后锁定 10 分钟起，防暴力破解
 		// （成功登录会清零，见 handler.LoginHandler）
 		api.POST("/login", middleware.LoginRateLimit(), handler.LoginHandler)

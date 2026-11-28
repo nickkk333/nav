@@ -19,7 +19,7 @@
           <div class="about-info-row">
             <span>当前版本</span>
             <a class="about-info-link" :href="ABOUT_INFO.releaseUrl" target="_blank" rel="noopener noreferrer">
-              v{{ ABOUT_INFO.version }}
+              {{ versionLabel }}
             </a>
           </div>
           <div class="about-info-row">
@@ -59,12 +59,21 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowLeft, Picture } from '@element-plus/icons-vue'
+import { fetchAppVersion } from '../api'
 import { useSiteStore } from '../stores/site'
 import { setColorTheme } from '../utils/theme'
 import { ABOUT_INFO, ABOUT_SUPPORT_TIP } from '../utils/about'
 
 const router = useRouter()
 const site = useSiteStore()
+
+/** 当前版本：默认取 package.json，加载到服务端构建信息后以服务端为准 */
+const appVersion = ref(ABOUT_INFO.version)
+const versionLabel = computed(() => {
+  const raw = appVersion.value.trim()
+  if (!raw || raw === 'dev') return '开发版'
+  return `v${raw.replace(/^v/i, '')}`
+})
 
 const FALLBACK_LOGO = `${import.meta.env.BASE_URL}logo192.png`
 const logoFailed = ref(false)
@@ -107,6 +116,14 @@ const goBack = () => {
 
 onMounted(async () => {
   document.title = '关于应用'
+  // 版本号以服务端构建信息为准（发版时由 git tag 注入）；旧版服务端没有该接口时保持 package.json 的版本
+  fetchAppVersion()
+    .then((info) => {
+      if (info?.version) appVersion.value = info.version
+    })
+    .catch(() => {
+      // 接口不可用时使用回退版本号
+    })
   try {
     await site.load()
     // 直接打开 /about 时也按服务端配置应用配色

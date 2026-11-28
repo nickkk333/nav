@@ -593,6 +593,33 @@ paths:
                         type: string
                         description: 图片描述，为空时前台显示默认提示
 
+  /api/version:
+    get:
+      security: []
+      summary: 获取服务端构建版本
+      description: >-
+        返回二进制构建时通过 -ldflags 注入的版本号与提交号，关于应用页用它显示当前版本；
+        未注入（例如 go run 直接运行）时 version 为 dev。
+      responses:
+        "200":
+          description: 成功获取版本信息
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      version:
+                        type: string
+                        description: 版本号，发版构建形如 1.0.6
+                      commit:
+                        type: string
+                        description: 构建时的提交号
+
   /manifest.json:
     get:
       security: []

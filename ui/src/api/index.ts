@@ -50,6 +50,12 @@ export const fetchList = async (): Promise<HomeData> => {
   return data.data
 }
 
+/** 获取服务端构建版本（关于页显示；未注入版本时返回 dev） */
+export const fetchAppVersion = async (): Promise<{ version: string; commit: string }> => {
+  const { data } = await http.get<ApiResult<{ version: string; commit: string }>>('/version')
+  return data.data
+}
+
 /** 获取启用的搜索引擎（前台搜索用） */
 export const fetchGetEnabledSearchEngines = async (): Promise<SearchEngine[]> => {
   const { data } = await http.get<ApiResult<SearchEngine[]>>('/searchEngines')

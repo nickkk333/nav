@@ -1,7 +1,8 @@
 {
   "name": "nav-ui",
-  "version": "1.0.27",
+  "version": "1.0.6",
   "author": "nickkk333",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "engines": {
