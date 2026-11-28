@@ -40,6 +40,10 @@ SVC_CWD="${TRIM_PKGVAR}"
 SVC_BACKGROUND=y
 SVC_WRITE_PID=y
 
+# 本应用始终是原生安装：即使从旧版 Docker 包升级时残留了
+# ${TRIM_APPDEST}/app/docker-compose.yaml，也不要让框架按 Docker 模式托管
+DOCKER_NAME=""
+
 # 目录是否可写（以当前应用用户身份探测，避免只看权限位判断失误）
 dir_writable() {
     local dir="$1"

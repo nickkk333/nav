@@ -30,7 +30,7 @@ esac
 
 OUTPUT="${3:-$DEFAULT_OUTPUT}"
 case "$OUTPUT" in
-  /*) ;;
+  /*|[A-Za-z]:[\\/]*) ;;
   *) OUTPUT="$REPO_ROOT/$OUTPUT" ;;
 esac
 
